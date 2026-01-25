@@ -1,0 +1,32 @@
+<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <!-- Button face gradient (raised) -->
+    <linearGradient id="faceUp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2C2C2C"></stop>
+      <stop offset="100%" stop-color="#1A1A1A"></stop>
+    </linearGradient>
+
+    <!-- Drop shadow -->
+    <filter id="shadowUp" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.6"></feGaussianBlur>
+      <feOffset dx="0" dy="1.4"></feOffset>
+      <feMerge>
+        <feMergeNode></feMergeNode>
+        <feMergeNode in="SourceGraphic"></feMergeNode>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Outer frame -->
+  <rect x="2" y="2" width="32" height="32" rx="6" fill="#222326"></rect>
+
+  <!-- Inner recess -->
+  <rect x="4" y="4" width="28" height="28" rx="5" fill="#141414"></rect>
+
+  <!-- Button face -->
+  <rect x="6" y="6" width="24" height="24" rx="4" fill="url(#faceUp)" stroke="#3A3A3A" stroke-width="1.2" filter="url(#shadowUp)"></rect>
+
+  <!-- Underline LED (off) -->
+  <rect x="11.5" y="15.6" width="13" height="2.3" rx="1.1" fill="#4A4A4A"></rect>
+</svg>
