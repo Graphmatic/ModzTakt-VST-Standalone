@@ -35,9 +35,14 @@ public:
         addAndMakeVisible(midiOutputBox);
 
         // MIDI Input for Clock
-        midiInputLabel.setText("MIDI Input (Clock):", juce::dontSendNotification);
-        addAndMakeVisible(midiInputLabel);
-        addAndMakeVisible(midiInputBox);
+        const bool isStandaloneWrapper = (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
+        if (isStandaloneWrapper)
+        {
+            midiInputLabel.setText("MIDI Input (Clock):", juce::dontSendNotification);
+            addAndMakeVisible(midiInputLabel);
+            addAndMakeVisible(midiInputBox);
+        }
+        midiInputBox.setEnabled (isStandaloneWrapper);
 
         refreshMidiInputs();
         refreshMidiOutputs();
@@ -52,7 +57,11 @@ public:
         // SET UP CALLBACKS BEFORE POPULATING OR SETTING VALUES
         midiOutputBox.onChange = [this] { openSelectedMidiOutput(); };
         midiInputBox.onChange = [this]() { updateMidiInput(); };
-        syncModeBox.onChange = [this]() { updateMidiClockState(); };
+        syncModeBox.onChange = [this]()
+        {
+            syncEnabled = (syncModeBox.getSelectedId() == 2);
+            updateMidiClockState();
+        };
 
         // NOW populate the combo boxes (might trigger callbacks if devices exist)
         refreshMidiOutputs();
@@ -972,6 +981,8 @@ private:
     std::atomic<bool> requestLfoRestart { false };
     std::atomic<bool> requestLfoStop { false };
 
+    bool syncEnabled = false;
+
     //DEBUG
     #if JUCE_DEBUG
     // Debug: show last Note-On received
@@ -1152,7 +1163,7 @@ private:
     // Call to start/stop the MidiClockHandler based on UI state
     void updateMidiClockState()
     {
-        const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
+        //const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
         
         if (syncEnabled)
         {
