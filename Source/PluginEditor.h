@@ -39,7 +39,10 @@ private:
     // NOTE: MainComponent currently inherits Timer + manages MIDI devices.
     // For plugin-first, we will later refactor it into UI-only, and move
     // the engine + MIDI I/O into the processor (processBlock).
-    MainComponent mainComponent;
+    // MainComponent mainComponent;
+
+    // MainComponent mainComponent (processor.getAPVTS());
+    MainComponent mainComponent { processor };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModzTaktAudioProcessorEditor)
 };

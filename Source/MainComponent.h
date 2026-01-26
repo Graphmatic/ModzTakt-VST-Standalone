@@ -9,10 +9,13 @@
 
 class MainComponent : public juce::Component,
                       private juce::Timer,
-                      public MidiClockListener
+                      public MidiClockListener,
+                      private juce::AudioProcessorValueTreeState::Listener
 {
 public:
-    MainComponent()
+    MainComponent (ModzTaktAudioProcessor& p)
+                                            : processor (p),
+                                              apvts (p.getAPVTS())
     {
 
         // Initialize MIDI clock listener
@@ -52,15 +55,25 @@ public:
         addAndMakeVisible(syncModeLabel);
         addAndMakeVisible(syncModeBox);
         syncModeBox.addItem("Free", 1);
-        syncModeBox.addItem("MIDI Clock", 2);
+        if (isStandaloneWrapper)
+        {
+            syncModeBox.addItem("MIDI Clock", 2);
+        }
+        else
+        {
+            syncModeBox.addItem("Host Clock", 2);
+        }
+        // apvts
+        syncModeAttach = std::make_unique<ChoiceAttachment>(apvts, "syncMode", syncModeBox);
+        apvts.addParameterListener ("syncMode", this);
 
         // SET UP CALLBACKS BEFORE POPULATING OR SETTING VALUES
         midiOutputBox.onChange = [this] { openSelectedMidiOutput(); };
         midiInputBox.onChange = [this]() { updateMidiInput(); };
         syncModeBox.onChange = [this]()
         {
-            syncEnabled = (syncModeBox.getSelectedId() == 2);
-            updateMidiClockState();
+            //xx syncEnabled = (syncModeBox.getSelectedId() == 2);
+            //updateMidiClockState();
         };
 
         // NOW populate the combo boxes (might trigger callbacks if devices exist)
@@ -99,6 +112,8 @@ public:
         divisionBox.addItem("1/16 dotted", 8);
         divisionBox.onChange = [this]() { updateLfoRateFromBpm(rateSlider.getValue()); };
         addAndMakeVisible(divisionBox);
+        // apvts
+        syncDivisionAttach = std::make_unique<ChoiceAttachment>(apvts, "syncDivision", divisionBox);
 
         divisionBox.setSelectedId(3); // default quarter note
 
@@ -112,31 +127,8 @@ public:
         shapeBox.addItem("Saw", 4);
         shapeBox.addItem("Random", 5);
         shapeBox.setSelectedId(1);
-
-        shapeBox.onChange = [this]()
-        {
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                if (shapeBox.getSelectedId() == 5) // disable bipolar and invert-Phase if shape = Random
-                {
-                    routeBipolarToggles[i]->setToggleState(false, juce::sendNotification);
-                    routeBipolarToggles[i]->setEnabled(false);
-                    routeBipolarToggles[i]->setAlpha(0.8f);
-
-                    routeInvertToggles[i]->setToggleState(false, juce::sendNotification);
-                    routeInvertToggles[i]->setEnabled(false);
-                    routeInvertToggles[i]->setAlpha(0.8f);
-                }
-                else
-                {
-                    routeBipolarToggles[i]->setEnabled(true);
-                    routeBipolarToggles[i]->setAlpha(1.0f);
-
-                    routeInvertToggles[i]->setEnabled(true);
-                    routeInvertToggles[i]->setAlpha(1.0f);
-                }
-            }
-        };
+        // apvts
+        shapeAttach = std::make_unique<ChoiceAttachment>(apvts, "lfoShape", shapeBox);
 
         // Rate
         rateLabel.setText("Rate:", juce::dontSendNotification);
@@ -144,9 +136,11 @@ public:
         addAndMakeVisible(rateSlider);
         rateSlider.setRange(0.1, 20.0, 0.01);
         rateSlider.setValue(2.0);
+        rateSlider.setNumDecimalPlacesToDisplay(2);
         rateSlider.setTextValueSuffix(" Hz");
         rateSlider.setLookAndFeel(&lookGreen);
-
+        // apvts
+        rateAttach = std::make_unique<SliderAttachment>(apvts, "lfoRateHz", rateSlider);
 
         // Depth
         depthLabel.setText("Depth:", juce::dontSendNotification);
@@ -154,13 +148,16 @@ public:
         addAndMakeVisible(depthSlider);
         depthSlider.setRange(0.0, 1.0, 0.01);
         depthSlider.setValue(1.0);
+        depthSlider.setNumDecimalPlacesToDisplay(2);
         depthSlider.setLookAndFeel(&lookPurple);
-
+        // apvts
+        depthAttach = std::make_unique<SliderAttachment>(apvts, "lfoDepth", depthSlider);
 
           // Start Button
         addAndMakeVisible(startButton);
         startButton.setButtonText("Start LFO");
-        startButton.onClick = [this] { toggleLfo(); };
+        // apvts
+        lfoActiveAttach = std::make_unique<ButtonAttachment>(apvts, "lfoActive", startButton);
 
         // Note-On Restart
         noteRestartToggle = std::make_unique<LedToggleButton>
@@ -172,6 +169,8 @@ public:
         addAndMakeVisible (*noteRestartToggle);
         noteRestartToggle->setToggleState (false, juce::dontSendNotification);
         noteRestartToggle->setButtonText ("");
+        // apvts
+        noteRestartAttach = std::make_unique<ButtonAttachment>(apvts, "noteRestart", *noteRestartToggle);
 
         noteRestartToggleLabel.setText ("Restart on Note-On", juce::dontSendNotification);
         noteRestartToggleLabel.setJustificationType (juce::Justification::centredLeft);
@@ -181,6 +180,8 @@ public:
 
         addAndMakeVisible(noteSourceChannelBox);
         noteSourceChannelBox.setTextWhenNothingSelected("Source Channel");
+        // apvts
+        noteSourceChannelAttach = std::make_unique<ChoiceAttachment>(apvts, "noteSourceChannel", noteSourceChannelBox);
 
         noteSourceChannelBox.onChange = [this]()
         {
@@ -213,7 +214,6 @@ public:
             addAndMakeVisible(*noteOffStopToggle);
             addAndMakeVisible (noteOffStopToggleLabel);
 
-
             if (!enabled)
             {
                 noteOffStopToggle->setToggleState(false, juce::dontSendNotification);
@@ -233,10 +233,12 @@ public:
             "Stop on Note-Off",
             SetupUI::LedColour::Orange
         );
-
+        addAndMakeVisible(*noteOffStopToggle);
         noteOffStopToggle->setVisible(noteRestartToggle->getToggleState());
         noteOffStopToggle->setButtonText ("");
         noteOffStopToggle->setEnabled(false);
+        // apvts
+        noteOffStopAttach = std::make_unique<ButtonAttachment>(apvts, "noteOffStop", *noteOffStopToggle);
 
         noteOffStopToggleLabel.setText ("Stop on Note-Off", juce::dontSendNotification);
         noteOffStopToggleLabel.setJustificationType (juce::Justification::centredLeft);
@@ -268,153 +270,107 @@ public:
         // Multi-CC Routing (3 routes)
         for (int i = 0; i < maxRoutes; ++i)
         {
+            const auto rs = juce::String(i);
+
             // Label
-            routeLabels[i].setText("Route " + juce::String(i + 1),
-                                    juce::dontSendNotification);
+            routeLabels[i].setText("Route " + juce::String(i + 1), juce::dontSendNotification);
             addAndMakeVisible(routeLabels[i]);
 
-            // Channel box
-            if (i != 0) {
+            // Channel box: must match APVTS choice order: Disabled, Ch1..Ch16
+            routeChannelBoxes[i].clear();
+            if (i != 0) 
+            {
                 routeChannelBoxes[i].addItem("Disabled", 1);
             }
-            
             for (int ch = 1; ch <= 16; ++ch)
                 routeChannelBoxes[i].addItem("Ch " + juce::String(ch), ch + 1);
-
             addAndMakeVisible(routeChannelBoxes[i]);
 
-            // Parameter box
+            // Parameter box: must match syntaktParamNames order (p+1 IDs)
+            routeParameterBoxes[i].clear();
             for (int p = 0; p < juce::numElementsInArray(syntaktParameters); ++p)
                 routeParameterBoxes[i].addItem(syntaktParameters[p].name, p + 1);
-
             addAndMakeVisible(routeParameterBoxes[i]);
 
-            // Bipolar toggle
-            routeBipolarToggles[i] = std::make_unique<LedToggleButton>
-            (
-                "+/-",
-                SetupUI::LedColour::Green
-            );
+            // Toggles
+            routeBipolarToggles[i] = std::make_unique<LedToggleButton>("+/-", SetupUI::LedColour::Green);
             routeBipolarToggles[i]->setButtonText("+/-");
             addAndMakeVisible(*routeBipolarToggles[i]);
 
-            // Invert Phase toggle
-            routeInvertToggles[i] = std::make_unique<LedToggleButton>
-            (
-                "Inv",
-                SetupUI::LedColour::Green
-            );
+            routeInvertToggles[i] = std::make_unique<LedToggleButton>("Inv", SetupUI::LedColour::Green);
             routeInvertToggles[i]->setButtonText("Inv");
             addAndMakeVisible(*routeInvertToggles[i]);
 
-            // One Shot toggle
-            routeOneShotToggles[i] = std::make_unique<LedToggleButton>
-            (
-                "Inv",
-                SetupUI::LedColour::Orange
-            );
+            routeOneShotToggles[i] = std::make_unique<LedToggleButton>("1-Shot", SetupUI::LedColour::Orange);
             routeOneShotToggles[i]->setButtonText("1-Shot");
             addAndMakeVisible(*routeOneShotToggles[i]);
 
-            // Set up callbacks BEFORE setting any values
+            // --- Attachments (must exist BEFORE you rely on parameter-driven state) ---
+            routeChannelAttach[i] = std::make_unique<ChoiceAttachment>(apvts, "route" + rs + "_channel", routeChannelBoxes[i]);
+            routeParamAttach[i]   = std::make_unique<ChoiceAttachment>(apvts, "route" + rs + "_param",    routeParameterBoxes[i]);
+
+            routeBipolarAttach[i] = std::make_unique<ButtonAttachment>(apvts, "route" + rs + "_bipolar", *routeBipolarToggles[i]);
+            routeInvertAttach[i]  = std::make_unique<ButtonAttachment>(apvts, "route" + rs + "_invert",  *routeInvertToggles[i]);
+            routeOneShotAttach[i] = std::make_unique<ButtonAttachment>(apvts, "route" + rs + "_oneshot", *routeOneShotToggles[i]);
+
+            // --- UI-only behavior on channel change (visibility etc.) ---
             routeChannelBoxes[i].onChange = [this, i]()
             {
-                //debug
-                bool stopLFO = false;
-                if (lfoActive)
-                {
-                    toggleLfo();
-                    stopLFO = true;
-                }
-                const int comboId = routeChannelBoxes[i].getSelectedId();
-                lfoRoutes[i].midiChannel = (comboId == 1) ? 0 : (comboId - 1);
+                const int comboId = routeChannelBoxes[i].getSelectedId(); // 1=Disabled, 2..17=Ch1..16
                 const bool enabled = (comboId != 1);
+
                 routeParameterBoxes[i].setVisible(enabled);
                 routeBipolarToggles[i]->setVisible(enabled);
                 routeInvertToggles[i]->setVisible(enabled);
+
+                // If disabling the route, force OneShot param OFF (optional but matches your old UX)
                 if (!enabled)
-                    routeOneShotToggles[i]->setToggleState(false, juce::dontSendNotification);
-                routeOneShotToggles[i]->setVisible(enabled && noteRestartToggle->getToggleState());
-
-                updateNoteSourceChannel();
-
-                if (stopLFO)
                 {
-                    toggleLfo();
-                    stopLFO = false;
+                    if (auto* p = apvts.getParameter("route" + juce::String(i) + "_oneshot"))
+                    {
+                        p->beginChangeGesture();
+                        p->setValueNotifyingHost(0.0f);
+                        p->endChangeGesture();
+                    }
                 }
-                
-                // Defer resized() to avoid blocking during ComboBox interaction
+
+                // Only show oneshot if route enabled AND noteRestart is enabled
+                const bool noteRestartOn = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
+                routeOneShotToggles[i]->setVisible(enabled && noteRestartOn);
+
+                // Initialize note source channel list
+                updateNoteSourceChannel();
+        
+                // Layout update
                 juce::MessageManager::callAsync([this]() { resized(); });
             };
 
+            // When parameter changes: optionally force bipolar according to parameter.isBipolar
             routeParameterBoxes[i].onChange = [this, i]()
             {
-                lfoRoutes[i].parameterIndex =
-                    routeParameterBoxes[i].getSelectedId() - 1;
+                const int idx = routeParameterBoxes[i].getSelectedId() - 1;
+                if (idx < 0 || idx >= juce::numElementsInArray(syntaktParameters))
+                    return;
 
-                const bool paramIsBipolar =
-                    syntaktParameters[lfoRoutes[i].parameterIndex].isBipolar;
+                const bool paramIsBipolar = syntaktParameters[idx].isBipolar;
 
-                // Initialize UI + route state ONCE
-                routeBipolarToggles[i]->setToggleState(paramIsBipolar,
-                                                     juce::dontSendNotification);
-                lfoRoutes[i].bipolar = paramIsBipolar;
+                // If you want "auto-init bipolar" each time user picks a param:
+                if (auto* p = apvts.getParameter("route" + juce::String(i) + "_bipolar"))
+                {
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost(paramIsBipolar ? 1.0f : 0.0f);
+                    p->endChangeGesture();
+                }
             };
 
+            // Initial visibility based on current parameter values (after attachments exist)
+            const bool enabledNow = (routeChannelBoxes[i].getSelectedId() != 1);
+            routeParameterBoxes[i].setVisible(enabledNow);
+            routeBipolarToggles[i]->setVisible(enabledNow);
+            routeInvertToggles[i]->setVisible(enabledNow);
 
-            routeBipolarToggles[i]->onClick = [this, i]()
-            {
-                lfoRoutes[i].bipolar = routeBipolarToggles[i]->getToggleState();
-                #if JUCE_DEBUG
-                updateLfoRouteDebugLabel();
-                #endif
-            };
-
-            routeInvertToggles[i]->onClick = [this, i]()
-            {
-                lfoRoutes[i].invertPhase = routeInvertToggles[i]->getToggleState();
-            };
-
-            routeOneShotToggles[i]->onClick = [this, i]()
-            {
-                lfoRoutes[i].oneShot = routeOneShotToggles[i]->getToggleState();
-
-                if (!lfoRoutes[i].oneShot)
-                    lfoRoutes[i].hasFinishedOneShot = false;
-            };
-
-            routeInvertToggles[i]->setToggleState(false, juce::dontSendNotification);
-            routeOneShotToggles[i]->setToggleState(false, juce::dontSendNotification);
-
-            // set initial values
-            if (i == 0)
-                routeChannelBoxes[i].setSelectedId(2, juce::dontSendNotification); // Ch 1
-            else
-                routeChannelBoxes[i].setSelectedId(1, juce::dontSendNotification); // Disabled
-                
-            routeParameterBoxes[i].setSelectedId(1, juce::dontSendNotification);
-            routeBipolarToggles[i]->setToggleState(false, juce::dontSendNotification);
-
-            // Initialize route state
-            lfoRoutes[i].midiChannel = (routeChannelBoxes[i].getSelectedId() == 1)
-                                        ? 0
-                                        : routeChannelBoxes[i].getSelectedId() - 1;
-
-            lfoRoutes[i].parameterIndex = routeParameterBoxes[i].getSelectedId() - 1;
-
-            lfoRoutes[i].bipolar = routeBipolarToggles[i]->getToggleState();
-
-            lfoRoutes[i].invertPhase = false;
-            lfoRoutes[i].oneShot     = false;
-            lfoRoutes[i].hasFinishedOneShot = false;
-
-            // Set initial visibility
-            const bool enabled = (routeChannelBoxes[i].getSelectedId() != 1);
-            routeParameterBoxes[i].setVisible(enabled);
-            routeBipolarToggles[i]->setVisible(enabled);
-            routeInvertToggles[i]->setVisible(enabled);
-            routeOneShotToggles[i]->setVisible(noteRestartToggle->getToggleState());
+            const bool noteRestartNow = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
+            routeOneShotToggles[i]->setVisible(enabledNow && noteRestartNow);
         }
 
         // Initialize note source channel list
@@ -569,6 +525,8 @@ public:
         midiOut.reset();
         rateSlider.setLookAndFeel (nullptr);
         depthSlider.setLookAndFeel (nullptr);
+
+        apvts.removeParameterListener ("syncMode", this);
     }
 
     void paint (juce::Graphics& g) override
@@ -941,22 +899,31 @@ public:
 
 private:
     // UI Components
+    ModzTaktAudioProcessor& processor;
+    ModzTaktAudioProcessor::APVTS& apvts;
+
+    //juce::AudioProcessorValueTreeState& apvts;
+
+    std::atomic<bool> pendingSyncModeChange { false };
+
+    
+
     juce::GroupComponent lfoGroup;
 
     juce::Label midiOutputLabel, midiInputLabel, syncModeLabel;
     juce::Label bpmLabelTitle, bpmLabel, divisionLabel;
     juce::Label parameterLabel, shapeLabel, rateLabel, depthLabel, channelLabel, bipolarLabel, invertPhaseLabel, oneShotLabel;
 
-    juce::ComboBox midiOutputBox, midiInputBox, syncModeBox, divisionBox;
-    juce::ComboBox shapeBox;
+    juce::ComboBox midiOutputBox, midiInputBox, syncModeBox, divisionBox; //////divbox
+    juce::ComboBox shapeBox; ////////////
 
     // SLiders
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };
     ModzTaktLookAndFeel lookPurple { SetupUI::sliderTrackPurple };
-    juce::Slider rateSlider, depthSlider;
+    juce::Slider rateSlider, depthSlider; //////////
 
     //Note-On retrig on/off and source channel
-    std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle;
+    std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle; ////////////
     juce::Label noteRestartToggleLabel, noteOffStopToggleLabel;
 
     juce::ComboBox noteSourceChannelBox; // source channel for Note-On listening (lfo)
@@ -1037,6 +1004,28 @@ private:
     // Setting Pop-Up
     juce::TextButton settingsButton;
 
+    //*******************************  APVTS ****************************************//
+    //*******************************************************************************//
+    using SliderAttachment  = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment  = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ChoiceAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+
+    std::unique_ptr<ButtonAttachment> lfoActiveAttach;  // juce::TextButton startButton;
+    std::unique_ptr<SliderAttachment> rateAttach, depthAttach;  // juce::Slider rateSlider, depthSlider;
+    std::unique_ptr<ChoiceAttachment> shapeAttach;  // juce::ComboBox shapeBox;
+    std::unique_ptr<ChoiceAttachment> syncModeAttach; // juce::ComboBox syncModeBox
+    std::unique_ptr<ButtonAttachment> noteRestartAttach, noteOffStopAttach; // std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle;
+    std::unique_ptr<ChoiceAttachment> noteSourceChannelAttach; // juce::ComboBox noteSourceChannelBox;
+    std::unique_ptr<ChoiceAttachment> syncDivisionAttach; // juce::ComboBox divisionBox
+
+    //LFO Routes UI
+    std::array<std::unique_ptr<ChoiceAttachment>, 3> routeChannelAttach;
+    std::array<std::unique_ptr<ChoiceAttachment>, 3> routeParamAttach;
+
+    std::array<std::unique_ptr<ButtonAttachment>, 3> routeBipolarAttach;
+    std::array<std::unique_ptr<ButtonAttachment>, 3> routeInvertAttach;
+    std::array<std::unique_ptr<ButtonAttachment>, 3> routeOneShotAttach;
+
     // LFO State
     double phase = 0.0;
     double sampleRate = 100.0;
@@ -1046,6 +1035,8 @@ private:
     bool oneShotActive = false;
 
     double oneShotPhaseAccum = 0.0;
+
+    bool lastWasRandomShape = false;
 
     // BPM smoothing / throttling
     double displayedBpm = 0.0;
@@ -1069,6 +1060,15 @@ private:
     // settings - Anti flooding
     std::unordered_map<int, double> lastSendTimePerParam;
     double msFloofThreshold = 0.0; // delay between Midi datas chunk
+
+    void parameterChanged (const juce::String& paramID, float newValue) override
+    {
+        if (paramID == "syncMode")
+        {
+            // runs on audio thread: DO NOT touch UI or start/stop devices here
+            pendingSyncModeChange.store (true, std::memory_order_release);
+        }
+    }
 
     //MIDI MONITOR
     #if JUCE_DEBUG
@@ -1094,13 +1094,17 @@ private:
 
         juce::Array<int> activeChannels;
 
-        // Collect unique active MIDI channels from routes
-        for (const auto& route : lfoRoutes)
+        for (int i = 0; i < maxRoutes; ++i)
         {
-            if (route.midiChannel > 0 && !activeChannels.contains(route.midiChannel))
-                activeChannels.add(route.midiChannel);
+            const auto rs = juce::String(i);
+            int channelIsActive = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16=Ch1..16
+            if (i == 0)
+                channelIsActive += 1;
+            // Collect unique active MIDI channels from routes
+            if (channelIsActive > 0 && !activeChannels.contains(channelIsActive))
+                activeChannels.add(channelIsActive);
         }
-
+        
         // Populate selector
         for (int ch : activeChannels)
             noteSourceChannelBox.addItem("Ch " + juce::String(ch), ch);
@@ -1161,29 +1165,38 @@ private:
     }
 
     // Call to start/stop the MidiClockHandler based on UI state
-    void updateMidiClockState()
+    void updateMidiClockState(bool syncEnabled)
     {
-        //const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
+
+        const bool isStandaloneWrapper =
+            (juce::PluginHostType::getPluginLoadedAs()
+             == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
+
+        const bool isHostedPlugin = !isStandaloneWrapper;
+
         
+        //xx const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
+
+        if (isHostedPlugin)
+        {
+            // Hosted plugin: device clock selection is meaningless
+            midiClock.stop();        // ensure no OS device callback is running
+            return;                  // host clock is fed in processBlock()
+        }
+
+        // Standalone wrapper: you may use separate device clock
         if (syncEnabled)
         {
-            int inIndex = midiInputBox.getSelectedId() - 1;
-            if (inIndex >= 0)
-            {
-                midiClock.start(inIndex);
-            }
-            else
-            {
-                // No valid input selected, stop the clock
-                midiClock.stop();
-            }
+            const int inIndex = midiInputBox.getSelectedId() - 1;
+            if (inIndex >= 0) midiClock.start(inIndex);
+            else              midiClock.stop();
         }
         else
         {
-            // Free mode - ensure the clock is stopped
             midiClock.stop();
         }
     }
+
     
     struct GlobalMidiCallback : public juce::MidiInputCallback
     {
@@ -1244,107 +1257,156 @@ private:
             globalMidiInput->start();
     }
 
-    void toggleLfo()
-    {
-        if (lfoActive)
-        {
-            // reset LFO value
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                auto& route = lfoRoutes[i];
-                lfoPhase[i] = getWaveformStartPhase(
-                    shapeBox.getSelectedId(),
-                    lfoRoutes[i].bipolar,
-                    lfoRoutes[i].invertPhase
-                );
+    // void toggleLfo()
+    // {
+    //     if (lfoActive)
+    //     {
+    //         // reset LFO value
+    //         for (int i = 0; i < maxRoutes; ++i)
+    //         {
+    //             auto& route = lfoRoutes[i];
+    //             lfoPhase[i] = getWaveformStartPhase(
+    //                 shapeBox.getSelectedId(),
+    //                 lfoRoutes[i].bipolar,
+    //                 lfoRoutes[i].invertPhase
+    //             );
 
-                lfoRoutes[i].hasFinishedOneShot = false;
-                lfoRoutes[i].passedPeak = false;
-            }
+    //             lfoRoutes[i].hasFinishedOneShot = false;
+    //             lfoRoutes[i].passedPeak = false;
+    //         }
             
-            lfoActive = false;
-            startButton.setButtonText("Start LFO");
-        }
-        else
-        {
-            // Clock may still be needed for sync
-            updateMidiClockState();
-            // reset LFO value
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                auto& route = lfoRoutes[i];
-                lfoPhase[i] = getWaveformStartPhase(
-                    shapeBox.getSelectedId(),
-                    lfoRoutes[i].bipolar,
-                    lfoRoutes[i].invertPhase
-                );
+    //         lfoActive = false;
+    //         startButton.setButtonText("Start LFO");
+    //     }
+    //     else
+    //     {
+    //         // Clock may still be needed for sync
+    //         updateMidiClockState();
+    //         // reset LFO value
+    //         for (int i = 0; i < maxRoutes; ++i)
+    //         {
+    //             auto& route = lfoRoutes[i];
+    //             lfoPhase[i] = getWaveformStartPhase(
+    //                 shapeBox.getSelectedId(),
+    //                 lfoRoutes[i].bipolar,
+    //                 lfoRoutes[i].invertPhase
+    //             );
 
-                lfoRoutes[i].hasFinishedOneShot = false;
-                lfoRoutes[i].passedPeak = false;
-            }
+    //             lfoRoutes[i].hasFinishedOneShot = false;
+    //             lfoRoutes[i].passedPeak = false;
+    //         }
             
-            lfoActive = true;
-            startButton.setButtonText("Stop LFO");
-        }
-    }
+    //         lfoActive = true;
+    //         startButton.setButtonText("Stop LFO");
+    //     }
+    // }
 
     // Timer Callback
     void timerCallback() override
     {
+        // UI update
+        const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
+        startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
+
+        const int shapeId = shapeBox.getSelectedId();
+        const bool isRandom = (shapeId == 5);
+
+        if (isRandom != lastWasRandomShape)
+        {
+            lastWasRandomShape = isRandom;
+
+            for (int i = 0; i < maxRoutes; ++i)
+            {
+                auto* bipolar = routeBipolarToggles[i].get();
+                auto* invert  = routeInvertToggles[i].get();
+
+                if (isRandom)
+                {
+                    bipolar->setToggleState(false, juce::dontSendNotification); // do not update actual flag! so:
+                    // TODO : UPDATE routes flags explicitely so Random always bypass bipolar/phase
+                    bipolar->setEnabled(false);
+                    bipolar->setAlpha(0.8f);
+
+                    invert->setToggleState(false, juce::dontSendNotification);
+                    // TODO : UPDATE routes flags explicitely so Random always bypass bipolar/phase
+
+                    invert->setEnabled(false);
+                    invert->setAlpha(0.8f);
+                }
+                else
+                {
+                    bipolar->setEnabled(true);
+                    bipolar->setAlpha(1.0f);
+
+                    invert->setEnabled(true);
+                    invert->setAlpha(1.0f);
+                }
+            }
+        }
+
+        //lastWasRandomShape = false;
+
+        if (pendingSyncModeChange.exchange(false, std::memory_order_acq_rel))
+        {
+            const bool syncEnabled = processor.getAPVTS().getRawParameterValue("syncMode")->load();
+            updateMidiClockState(syncEnabled); // safe: runs on message thread
+        }
+        
+
         if (!midiOut)
             return;
 
         // Note messages
-        if (pendingNoteOn.exchange(false))
-        {
-            const int ch   = pendingNoteChannel.load();
-            const int note = pendingNoteNumber.load();
-            const float velocity = pendingNoteVelocity.load();
+        // if (pendingNoteOn.exchange(false))
+        // {
+        //     const int ch   = pendingNoteChannel.load();
+        //     const int note = pendingNoteNumber.load();
+        //     const float velocity = pendingNoteVelocity.load();
 
-            // --- EG ---
-            if (envelopeComponent && envelopeComponent->isEgEnabled())
-                envelopeComponent->noteOn(ch, note, velocity);
+        //     // --- EG ---
+        //     if (envelopeComponent && envelopeComponent->isEgEnabled())
+        //         envelopeComponent->noteOn(ch, note, velocity);
 
-            // --- LFO Note Restart ---
-            const int restartCh = noteRestartChannel.load(std::memory_order_acquire);
+        //     // --- LFO Note Restart ---
+        //     const int restartCh = noteRestartChannel.load(std::memory_order_acquire);
 
-            if (noteRestartToggle->getToggleState()
-                && restartCh > 0
-                && ch == restartCh)
-            {
-                requestLfoRestart.store(true, std::memory_order_release);
+        //     if (noteRestartToggle->getToggleState()
+        //         && restartCh > 0
+        //         && ch == restartCh)
+        //     {
+        //         requestLfoRestart.store(true, std::memory_order_release);
                 
-                #if JUCE_DEBUG
-                noteDebugLabel.setText("NoteOn: Ch " + juce::String(ch) +
-                                       " | Note " + juce::String(note),
-                                       juce::dontSendNotification);
-               #endif
-            }
-        }
+        //         #if JUCE_DEBUG
+        //         noteDebugLabel.setText("NoteOn: Ch " + juce::String(ch) +
+        //                                " | Note " + juce::String(note),
+        //                                juce::dontSendNotification);
+        //        #endif
+        //     }
+        // }
 
-        // EG trig
-        if (pendingNoteOff.exchange(false))
-        {
-            const int ch = pendingNoteChannel.load();
-            const int note = pendingNoteOff.load();
+        // // EG trig
+        // if (pendingNoteOff.exchange(false))
+        // {
+        //     const int ch = pendingNoteChannel.load();
+        //     const int note = pendingNoteOff.load();
 
-            if (envelopeComponent && envelopeComponent->isEgEnabled())
-                envelopeComponent->noteOff(ch, note);
-        }
+        //     if (envelopeComponent && envelopeComponent->isEgEnabled())
+        //         envelopeComponent->noteOff(ch, note);
+        // }
 
-        // Stop LFO on Note-Off
-        if (requestLfoStop.exchange(false))
-        {
-            lfoActive = false;
-            startButton.setButtonText("Start LFO");
+        // // Stop LFO on Note-Off
+        // if (requestLfoStop.exchange(false))
+        // {
+        //     lfoActive = false;
+        //     startButton.setButtonText("Start LFO");
 
-            // reset phases for next start
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                lfoRoutes[i].hasFinishedOneShot = false;
-                lfoRoutes[i].passedPeak = false;
-            }
-        }
+        //     // reset phases for next start
+        //     for (int i = 0; i < maxRoutes; ++i)
+        //     {
+        //         lfoRoutes[i].hasFinishedOneShot = false;
+        //         lfoRoutes[i].passedPeak = false;
+        //     }
+        // }
 
         // LFO
         const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
@@ -1744,7 +1806,7 @@ private:
 
         lfoActive = false;
         // passing via the UI start/stop function to avoid decoherence between HW and UI
-        toggleLfo();
+        //toggleLfo();
     }
 
     void handleMidiStop() override
@@ -1764,7 +1826,7 @@ private:
             }
 
         lfoActive = true;
-        toggleLfo();
+        //toggleLfo();
     }
 
     double updateLfoRateFromBpm(double rateHz)
