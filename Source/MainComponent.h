@@ -133,12 +133,13 @@ public:
         // Rate
         rateLabel.setText("Rate:", juce::dontSendNotification);
         addAndMakeVisible(rateLabel);
+        
         addAndMakeVisible(rateSlider);
         rateSlider.setRange(0.1, 20.0, 0.01);
         rateSlider.setValue(2.0);
-        rateSlider.setNumDecimalPlacesToDisplay(2);
         rateSlider.setTextValueSuffix(" Hz");
         rateSlider.setLookAndFeel(&lookGreen);
+        rateSlider.setNumDecimalPlacesToDisplay(2);
         // apvts
         rateAttach = std::make_unique<SliderAttachment>(apvts, "lfoRateHz", rateSlider);
 
@@ -148,8 +149,8 @@ public:
         addAndMakeVisible(depthSlider);
         depthSlider.setRange(0.0, 1.0, 0.01);
         depthSlider.setValue(1.0);
-        depthSlider.setNumDecimalPlacesToDisplay(2);
         depthSlider.setLookAndFeel(&lookPurple);
+        depthSlider.setNumDecimalPlacesToDisplay(2);
         // apvts
         depthAttach = std::make_unique<SliderAttachment>(apvts, "lfoDepth", depthSlider);
 
