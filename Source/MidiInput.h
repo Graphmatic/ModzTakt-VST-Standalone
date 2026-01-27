@@ -1,4 +1,5 @@
 #pragma once
+
 #include <JuceHeader.h>
 
 // Listener interface for transport events (unchanged)

@@ -9,7 +9,6 @@
 
 class MainComponent : public juce::Component,
                       private juce::Timer,
-                      public MidiClockListener,
                       private juce::AudioProcessorValueTreeState::Listener
 {
 public:
@@ -17,10 +16,6 @@ public:
                                             : processor (p),
                                               apvts (p.getAPVTS())
     {
-
-        // Initialize MIDI clock listener
-        midiClock.setListener(this);
-
         // frame
         lfoGroup.setText("LFO");
         lfoGroup.setColour(juce::GroupComponent::outlineColourId, juce::Colours::white);
@@ -32,29 +27,12 @@ public:
         envelopeComponent = std::make_unique<EnvelopeComponent>();
         addAndMakeVisible(*envelopeComponent);
 
-        // MIDI Output
-        midiOutputLabel.setText("MIDI Output:", juce::dontSendNotification);
-        addAndMakeVisible(midiOutputLabel);
-        addAndMakeVisible(midiOutputBox);
-
-        // MIDI Input for Clock
-        const bool isStandaloneWrapper = (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
-        if (isStandaloneWrapper)
-        {
-            midiInputLabel.setText("MIDI Input (Clock):", juce::dontSendNotification);
-            addAndMakeVisible(midiInputLabel);
-            addAndMakeVisible(midiInputBox);
-        }
-        midiInputBox.setEnabled (isStandaloneWrapper);
-
-        refreshMidiInputs();
-        refreshMidiOutputs();
-
         // Sync Mode
         syncModeLabel.setText("Sync Source:", juce::dontSendNotification);
         addAndMakeVisible(syncModeLabel);
         addAndMakeVisible(syncModeBox);
         syncModeBox.addItem("Free", 1);
+        const bool isStandaloneWrapper = (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
         if (isStandaloneWrapper)
         {
             syncModeBox.addItem("MIDI Clock", 2);
@@ -67,29 +45,8 @@ public:
         syncModeAttach = std::make_unique<ChoiceAttachment>(apvts, "syncMode", syncModeBox);
         apvts.addParameterListener ("syncMode", this);
 
-        // SET UP CALLBACKS BEFORE POPULATING OR SETTING VALUES
-        midiOutputBox.onChange = [this] { openSelectedMidiOutput(); };
-        midiInputBox.onChange = [this]() { updateMidiInput(); };
-        syncModeBox.onChange = [this]()
-        {
-            //xx syncEnabled = (syncModeBox.getSelectedId() == 2);
-            //updateMidiClockState();
-        };
-
-        // NOW populate the combo boxes (might trigger callbacks if devices exist)
-        refreshMidiOutputs();
-        refreshMidiInputs();
-
         // Set default selections AFTER everything is wired up
         syncModeBox.setSelectedId(1); // Free mode by default      
-
-        // Select first available MIDI output if any
-        if (midiOutputBox.getNumItems() > 0)
-            midiOutputBox.setSelectedId(1);
-    
-        // Select first available MIDI input if any  
-        if (midiInputBox.getNumItems() > 0)
-            midiInputBox.setSelectedId(1);
 
         // BPM Display
         bpmLabelTitle.setText("Detected BPM:", juce::dontSendNotification);
@@ -110,7 +67,7 @@ public:
         divisionBox.addItem("1/32", 6);
         divisionBox.addItem("1/8 dotted", 7);
         divisionBox.addItem("1/16 dotted", 8);
-        divisionBox.onChange = [this]() { updateLfoRateFromBpm(rateSlider.getValue()); };
+        //divisionBox.onChange = [this]() { updateLfoRateFromBpm(rateSlider.getValue()); };
         addAndMakeVisible(divisionBox);
         // apvts
         syncDivisionAttach = std::make_unique<ChoiceAttachment>(apvts, "syncDivision", divisionBox);
@@ -157,6 +114,8 @@ public:
           // Start Button
         addAndMakeVisible(startButton);
         startButton.setButtonText("Start LFO");
+        startButton.setClickingTogglesState(true);  // CRITICAL: lets ButtonAttachment change APVTS
+
         // apvts
         lfoActiveAttach = std::make_unique<ButtonAttachment>(apvts, "lfoActive", startButton);
 
@@ -203,9 +162,6 @@ public:
                 {
                     // Hard-disable one-shot state
                     routeOneShotToggles[i]->setToggleState(false, juce::dontSendNotification);
-
-                    lfoRoutes[i].oneShot = false;
-                    lfoRoutes[i].hasFinishedOneShot = false;
                 }
             }
 
@@ -279,10 +235,9 @@ public:
 
             // Channel box: must match APVTS choice order: Disabled, Ch1..Ch16
             routeChannelBoxes[i].clear();
-            if (i != 0) 
-            {
-                routeChannelBoxes[i].addItem("Disabled", 1);
-            }
+
+            routeChannelBoxes[i].addItem("Disabled", 1);
+            
             for (int ch = 1; ch <= 16; ++ch)
                 routeChannelBoxes[i].addItem("Ch " + juce::String(ch), ch + 1);
             addAndMakeVisible(routeChannelBoxes[i]);
@@ -569,8 +524,6 @@ public:
             lfoAreaContent.removeFromTop(6);
         };
 
-        placeRow(midiOutputLabel, midiOutputBox);
-        placeRow(midiInputLabel, midiInputBox);
         placeRow(syncModeLabel, syncModeBox);
 
         // BPM label pair
@@ -977,8 +930,6 @@ private:
 
     std::unique_ptr<LedToggleButton> routeBipolarToggles[maxRoutes], routeInvertToggles[maxRoutes], routeOneShotToggles[maxRoutes];
 
-    std::array<double, maxRoutes> lfoPhase { 0.0, 0.0, 0.0 };
-
     #if JUCE_DEBUG
     std::unique_ptr<MidiMonitorWindow> midiMonitorWindow;
     juce::TextButton midiMonitorButton { "MIDI Monitor" };
@@ -1099,8 +1050,7 @@ private:
         {
             const auto rs = juce::String(i);
             int channelIsActive = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16=Ch1..16
-            if (i == 0)
-                channelIsActive += 1;
+           
             // Collect unique active MIDI channels from routes
             if (channelIsActive > 0 && !activeChannels.contains(channelIsActive))
                 activeChannels.add(channelIsActive);
@@ -1149,165 +1099,15 @@ private:
         #endif
     }
 
-    // MIDI Sync
-    void handleIncomingMessage(const juce::MidiMessage& msg)
-    {
-        const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
-        if (!syncEnabled)
-        {
-            midiClock.stop();
-            return;
-        }
-
-        // existing clock parsing here  midiInputBox
-        int inIndex = midiInputBox.getSelectedId() - 1;
-        midiClock.start(inIndex);
-        return;
-    }
-
-    // Call to start/stop the MidiClockHandler based on UI state
-    void updateMidiClockState(bool syncEnabled)
-    {
-
-        const bool isStandaloneWrapper =
-            (juce::PluginHostType::getPluginLoadedAs()
-             == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
-
-        const bool isHostedPlugin = !isStandaloneWrapper;
-
-        
-        //xx const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
-
-        if (isHostedPlugin)
-        {
-            // Hosted plugin: device clock selection is meaningless
-            midiClock.stop();        // ensure no OS device callback is running
-            return;                  // host clock is fed in processBlock()
-        }
-
-        // Standalone wrapper: you may use separate device clock
-        if (syncEnabled)
-        {
-            const int inIndex = midiInputBox.getSelectedId() - 1;
-            if (inIndex >= 0) midiClock.start(inIndex);
-            else              midiClock.stop();
-        }
-        else
-        {
-            midiClock.stop();
-        }
-    }
-
-    
-    struct GlobalMidiCallback : public juce::MidiInputCallback
-    {
-        MainComponent& owner;
-        GlobalMidiCallback(MainComponent& o) : owner(o) {}
-
-        void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& msg) override
-        {
-            // MIDI CLOCK
-            if (owner.syncModeBox.getSelectedId() == 2)
-            {
-                owner.handleIncomingMessage(msg); 
-            }
-
-            if (msg.isNoteOn())
-            {
-                owner.pendingNoteChannel.store(msg.getChannel(), std::memory_order_relaxed);
-                owner.pendingNoteNumber.store(msg.getNoteNumber(), std::memory_order_relaxed);
-                owner.pendingNoteVelocity.store(msg.getFloatVelocity(), std::memory_order_relaxed);
-                owner.pendingNoteOn.store(true, std::memory_order_release);
-            }
-            else if (msg.isNoteOff())
-            {
-                owner.pendingNoteChannel.store(msg.getChannel(), std::memory_order_relaxed);
-                owner.pendingNoteOff.store(true, std::memory_order_release);
-
-                // Request LFO stop only if UI allows it
-                if (owner.noteRestartToggle->getToggleState()
-                    && owner.noteOffStopToggle->getToggleState())
-                {
-                    owner.requestLfoStop.store(true, std::memory_order_release);
-                }
-            }
-        }
-    };
-
-    void updateMidiInput()
-    {
-        if (globalMidiInput)
-        {
-            globalMidiInput->stop();
-            globalMidiInput.reset();
-        }
-
-        auto inputs = juce::MidiInput::getAvailableDevices();
-        int index = midiInputBox.getSelectedId() - 1;
-        if (index < 0 || index >= inputs.size())
-        {
-            // Stop the clock if no valid input selected
-            midiClock.stop();
-            return;
-        }
-
-        midiCallback = std::make_unique<GlobalMidiCallback>(*this);
-        globalMidiInput = juce::MidiInput::openDevice(inputs[index].identifier,
-                                                       midiCallback.get());
-        if (globalMidiInput)
-            globalMidiInput->start();
-    }
-
-    // void toggleLfo()
-    // {
-    //     if (lfoActive)
-    //     {
-    //         // reset LFO value
-    //         for (int i = 0; i < maxRoutes; ++i)
-    //         {
-    //             auto& route = lfoRoutes[i];
-    //             lfoPhase[i] = getWaveformStartPhase(
-    //                 shapeBox.getSelectedId(),
-    //                 lfoRoutes[i].bipolar,
-    //                 lfoRoutes[i].invertPhase
-    //             );
-
-    //             lfoRoutes[i].hasFinishedOneShot = false;
-    //             lfoRoutes[i].passedPeak = false;
-    //         }
-            
-    //         lfoActive = false;
-    //         startButton.setButtonText("Start LFO");
-    //     }
-    //     else
-    //     {
-    //         // Clock may still be needed for sync
-    //         updateMidiClockState();
-    //         // reset LFO value
-    //         for (int i = 0; i < maxRoutes; ++i)
-    //         {
-    //             auto& route = lfoRoutes[i];
-    //             lfoPhase[i] = getWaveformStartPhase(
-    //                 shapeBox.getSelectedId(),
-    //                 lfoRoutes[i].bipolar,
-    //                 lfoRoutes[i].invertPhase
-    //             );
-
-    //             lfoRoutes[i].hasFinishedOneShot = false;
-    //             lfoRoutes[i].passedPeak = false;
-    //         }
-            
-    //         lfoActive = true;
-    //         startButton.setButtonText("Stop LFO");
-    //     }
-    // }
-
     // Timer Callback
     void timerCallback() override
     {
         // UI update
         const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
         startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
+
+        const double rateValue = processor.getAPVTS().getRawParameterValue("lfoRateHz")->load();
+        rateSlider.setValue(rateValue, juce::dontSendNotification);
 
         const int shapeId = shapeBox.getSelectedId();
         const bool isRandom = (shapeId == 5);
@@ -1345,99 +1145,13 @@ private:
             }
         }
 
-        //lastWasRandomShape = false;
-
-        if (pendingSyncModeChange.exchange(false, std::memory_order_acq_rel))
-        {
-            const bool syncEnabled = processor.getAPVTS().getRawParameterValue("syncMode")->load();
-            updateMidiClockState(syncEnabled); // safe: runs on message thread
-        }
-        
-
         if (!midiOut)
             return;
-
-        // Note messages
-        // if (pendingNoteOn.exchange(false))
-        // {
-        //     const int ch   = pendingNoteChannel.load();
-        //     const int note = pendingNoteNumber.load();
-        //     const float velocity = pendingNoteVelocity.load();
-
-        //     // --- EG ---
-        //     if (envelopeComponent && envelopeComponent->isEgEnabled())
-        //         envelopeComponent->noteOn(ch, note, velocity);
-
-        //     // --- LFO Note Restart ---
-        //     const int restartCh = noteRestartChannel.load(std::memory_order_acquire);
-
-        //     if (noteRestartToggle->getToggleState()
-        //         && restartCh > 0
-        //         && ch == restartCh)
-        //     {
-        //         requestLfoRestart.store(true, std::memory_order_release);
-                
-        //         #if JUCE_DEBUG
-        //         noteDebugLabel.setText("NoteOn: Ch " + juce::String(ch) +
-        //                                " | Note " + juce::String(note),
-        //                                juce::dontSendNotification);
-        //        #endif
-        //     }
-        // }
-
-        // // EG trig
-        // if (pendingNoteOff.exchange(false))
-        // {
-        //     const int ch = pendingNoteChannel.load();
-        //     const int note = pendingNoteOff.load();
-
-        //     if (envelopeComponent && envelopeComponent->isEgEnabled())
-        //         envelopeComponent->noteOff(ch, note);
-        // }
-
-        // // Stop LFO on Note-Off
-        // if (requestLfoStop.exchange(false))
-        // {
-        //     lfoActive = false;
-        //     startButton.setButtonText("Start LFO");
-
-        //     // reset phases for next start
-        //     for (int i = 0; i < maxRoutes; ++i)
-        //     {
-        //         lfoRoutes[i].hasFinishedOneShot = false;
-        //         lfoRoutes[i].passedPeak = false;
-        //     }
-        // }
 
         // LFO
         const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
         const double bpm = midiClock.getCurrentBPM();
         int egValue;
-
-        // Handle pending retrigger from Note-On
-        if (requestLfoRestart.exchange(false))
-        {
-            // reset LFO value
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                auto& route = lfoRoutes[i];
-                lfoPhase[i] = getWaveformStartPhase(
-                    shapeBox.getSelectedId(),
-                    lfoRoutes[i].bipolar,
-                    lfoRoutes[i].invertPhase
-                );
-
-                lfoRoutes[i].hasFinishedOneShot = false;
-                lfoRoutes[i].passedPeak = false;
-            }
-
-            if (!lfoActive)
-            {
-                lfoActive = true;
-                startButton.setButtonText("Stop LFO");
-            }
-
-        }
 
         // Always update BPM display if sync mode is active
         if (syncEnabled)
@@ -1469,426 +1183,6 @@ private:
         {
             // When not in sync mode, just freeze BPM display
         }
-
-        if (lfoActive)
-        {
-            // Compute current rate
-            double rateHz = rateSlider.getValue();
-
-            if (syncEnabled && bpm > 0.0)
-            {
-                rateHz = updateLfoRateFromBpm(rateHz);
-            }                
-
-            // Generate and send LFO values
-            const double phaseInc = rateHz / sampleRate;
-            const auto shapeId = static_cast<LfoShape>(shapeBox.getSelectedId());
-
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                auto& route = lfoRoutes[i];
-
-                if (route.midiChannel <= 0 || route.parameterIndex < 0)
-                    continue;
-
-                if (route.oneShot && route.hasFinishedOneShot)
-                    continue;
-
-                const bool wrapped = advancePhase(lfoPhase[i], phaseInc);
-
-                double shape = computeWaveform(shapeId,
-                                                lfoPhase[i],
-                                                route.bipolar,
-                                                route.invertPhase,
-                                                random
-                                            );
-
-                // One-shot logic
-                if (route.oneShot)
-                {
-                    if (route.bipolar)
-                    {
-                        if (wrapped)
-                            route.hasFinishedOneShot = true;
-                    }
-                    else
-                    {
-                        if (!route.passedPeak && shape >= 0.999)
-                            route.passedPeak = true;
-
-                        if (route.passedPeak && shape <= -0.999)
-                            route.hasFinishedOneShot = true;
-                    }
-                }
-
-                // Mapping
-                const auto& param = syntaktParameters[route.parameterIndex];
-                const double depth = depthSlider.getValue();
-
-                int midiVal = 0;
-
-                if (route.bipolar)
-                {
-                    const int center = (param.minValue + param.maxValue) / 2;
-                    const int range  = (param.maxValue - param.minValue) / 2;
-
-                    midiVal = center + int(std::round(shape * depth * range));
-                }
-                else
-                {
-                    const double uni = juce::jlimit(0.0, 1.0, (shape + 1.0) * 0.5);
-                    midiVal = param.minValue
-                            + int(std::round(uni * depth * (param.maxValue - param.minValue)));
-                }
-
-                midiVal = juce::jlimit(param.minValue, param.maxValue, midiVal);
-
-                sendThrottledParamValue(i, route.midiChannel, param, midiVal);
-
-                // Oscilloscope
-                if (lfoRoutesToScope[i])
-                {
-                    lastLfoRoutesValues[i].store(shape * depth, std::memory_order_relaxed);
-                }
-            }
-        }
-        
-        if (envelopeComponent && envelopeComponent->isEgEnabled())
-        {
-            double egMIDIvalue = 0.0;
-            
-            if (envelopeComponent->tick(egMIDIvalue))
-            {
-                #if JUCE_DEBUG
-                    float egScopeValue = static_cast<float>(egMIDIvalue * 2.0 - 1.0);
-                    // 0.0 → -1.0
-                    // 1.0 → +1.0
-                    if ( showEGinScope )
-                    {
-                        // ---- SCOPE DEBUG TAP (temporary) ----
-                        lastLfoRoutesValues[0].store(
-                            static_cast<float>(egMIDIvalue * 2.0 - 1.0),
-                            std::memory_order_relaxed
-                        );
-                        // -------------------------------------
-                    }
-                #endif
-
-                const int paramId = envelopeComponent->selectedEgOutParamsId();
-                const int egValue = mapEgToMidi(egMIDIvalue, paramId);
-                const int egCh    = envelopeComponent->selectedEgOutChannel();
-
-                if (egCh > 0 && paramId >= 0)
-                {
-                    const auto& param = syntaktParameters[paramId];
-
-                    sendThrottledParamValue(
-                        0x7FFF,
-                        egCh,
-                        param,
-                        egValue
-                    );
-                }
-            }
-        }
-
-        #if JUCE_DEBUG
-            if (showRouteDebugLabel)
-                updateLfoRouteDebugLabel();
-        #endif
-    }
-
-    inline bool advancePhase(double& phase, double phaseInc)
-    {
-        phase += phaseInc;
-        if (phase >= 1.0)
-        {
-            phase -= 1.0;
-            return true;
-        }
-        return false;
-    }
-
-    // waveforms
-    inline double lfoSine(double phase)
-    {
-        return std::sin(juce::MathConstants<double>::twoPi * phase);
-    }
-
-    inline double lfoTriangle(double phase)
-    {
-        // canonical triangle: 0 → +1 → 0 → -1 → 0
-        double t = phase - std::floor(phase);
-        return 4.0 * std::abs(t - 0.5) - 1.0;
-    }
-
-    inline double lfoSquare(double phase)
-    {
-        return (phase < 0.5) ? 1.0 : -1.0;
-    }
-
-    inline double lfoSaw(double phase)
-    {
-        return 2.0 * phase - 1.0;
-    }
-
-    inline double lfoRandom(double phase, juce::Random& rng)
-    {
-        static double lastPhase = 0.0;
-        static double lastValue = 0.0;
-
-        // detect phase wrap
-        if (phase < lastPhase) 
-        {
-            lastValue = rng.nextDouble() * 2.0 - 1.0;
-        }
-
-        lastPhase = phase;
-        return lastValue;
-    }
-
-    double computeWaveform(LfoShape shape,
-                           double phase,
-                           bool bipolar,
-                           bool invertPhase,
-                           juce::Random& rng)
-    {
-        // true phase inversion (180°)
-        if (invertPhase && shape != LfoShape::Saw)
-        {
-            phase += 0.5;
-            if (phase >= 1.0)
-                phase -= 1.0;
-        }
-
-        if (invertPhase && (shape == LfoShape::Saw))
-        {
-            phase = -phase;
-            if (phase <= 1.0)
-                phase += 1.0;
-        }
-
-        // phase alignment per shape
-        if (shape == LfoShape::Triangle && !bipolar)
-        {
-            phase += 0.25;
-            if (phase >= 1.0)
-                phase -= 1.0;
-        }
-
-        if (shape == LfoShape::Triangle && bipolar)
-        {
-            phase -= 0.25;
-            if (phase >= 1.0)
-                phase -= 1.0;
-        }
-
-        if (shape == LfoShape::Saw && bipolar)
-        {
-            phase += 0.5;
-            if (phase >= 1.0)
-                phase -= 1.0;
-        }
-
-        switch (shape)
-        {
-            case LfoShape::Sine:     return lfoSine(phase);
-            case LfoShape::Triangle: return lfoTriangle(phase);
-            case LfoShape::Square:   return lfoSquare(phase);
-            case LfoShape::Saw:      return lfoSaw(phase);
-            case LfoShape::Random:   return lfoRandom(phase, rng);
-            default:                 return 0.0;
-        }
-    }
-
-    // ensure that LFO Waveforms start from correct offset (bipolar/unipolar)
-    double getWaveformStartPhase(int shapeId, bool bipolar, bool invert) const
-    {
-        double phase = 0.0;
-
-        if (!bipolar)
-        {
-            switch (static_cast<LfoShape>(shapeId))
-            {
-                case LfoShape::Sine:     phase = 0.75; break; // -1
-                case LfoShape::Triangle: phase = 0.25; break; // -1 ✅ FIX
-                case LfoShape::Square:   phase = 0.5;  break; // -1
-                case LfoShape::Saw:      phase = 0.0;  break; // -1
-                default: break;
-            }
-        }
-
-        return phase;
-    }
-
-    // shared throttling and MIDI send function
-    void sendThrottledParamValue(
-                                int routeIndex,              // for unique throttle key
-                                int midiChannel,
-                                const SyntaktParameter& param,
-                                int midiValue)
-    {
-        // Build per-route + per-parameter key
-        const int paramKey =
-            (routeIndex << 16) |
-            (param.isCC ? 0x1000 : 0x2000) |
-            (param.isCC ? param.ccNumber
-                        : ((param.nrpnMsb << 7) | param.nrpnLsb));
-
-        // Value change threshold
-        const int lastVal = lastSentValuePerParam[paramKey];
-        if (std::abs(midiValue - lastVal) < changeThreshold)
-            return;
-
-        lastSentValuePerParam[paramKey] = midiValue;
-
-        // Time-based anti-flood
-        const double now = juce::Time::getMillisecondCounterHiRes();
-        if (now - lastSendTimePerParam[paramKey] < msFloofThreshold)
-            return;
-
-        lastSendTimePerParam[paramKey] = now;
-
-        // Split value if NRPN
-        const int valueMSB = (midiValue >> 7) & 0x7F;
-        const int valueLSB = midiValue & 0x7F;
-
-        const bool monitorInput = false;
-
-        if (param.isCC)
-        {
-            auto msg = juce::MidiMessage::controllerEvent(
-                midiChannel, param.ccNumber, midiValue);
-
-            midiOut->sendMessageNow(msg);
-
-            #if JUCE_DEBUG
-            if (midiMonitorWindow)
-                midiMonitorWindow->pushEvent(msg, monitorInput);
-            #endif
-        }
-
-        else
-        {
-            auto send = [&](int cc, int val)
-            {
-                auto msg = juce::MidiMessage::controllerEvent(midiChannel, cc, val);
-                midiOut->sendMessageNow(msg);
-
-                #if JUCE_DEBUG
-                if (midiMonitorWindow)
-                    midiMonitorWindow->pushEvent(msg, monitorInput);
-                #endif
-            };
-
-            send(99, param.nrpnMsb);
-            send(98, param.nrpnLsb);
-            send(6,  valueMSB);
-            send(38, valueLSB);
-        }
-    }
-
-    // MIDI Transport Callbacks
-    void handleMidiStart() override
-    {
-        // Reset LFO phase when sequencer starts
-        for (int i = 0; i < maxRoutes; ++i)
-        {
-            auto& route = lfoRoutes[i];
-            lfoPhase[i] = getWaveformStartPhase(
-                    shapeBox.getSelectedId(),
-                    lfoRoutes[i].bipolar,
-                    lfoRoutes[i].invertPhase
-            );
-
-            lfoRoutes[i].hasFinishedOneShot = false;
-            lfoRoutes[i].passedPeak = false;
-        }
-
-        lfoActive = false;
-        // passing via the UI start/stop function to avoid decoherence between HW and UI
-        //toggleLfo();
-    }
-
-    void handleMidiStop() override
-    {
-        // Reset LFO to get a clean start even is the LFO is restarted from the UI
-        for (int i = 0; i < maxRoutes; ++i)
-            {
-                auto& route = lfoRoutes[i];
-                lfoPhase[i] = getWaveformStartPhase(
-                    shapeBox.getSelectedId(),
-                    lfoRoutes[i].bipolar,
-                    lfoRoutes[i].invertPhase
-                );
-
-                lfoRoutes[i].hasFinishedOneShot = false;
-                lfoRoutes[i].passedPeak = false;
-            }
-
-        lfoActive = true;
-        //toggleLfo();
-    }
-
-    double updateLfoRateFromBpm(double rateHz)
-    {
-        const double bpm = midiClock.getCurrentBPM();
-        const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
-        if (syncEnabled && bpm > 0.0)
-        {
-            rateHz = bpmToHz(bpm);
-
-            rateSlider.setValue(rateHz, juce::dontSendNotification);
-        }
-            
-        return rateHz;
-    }
-
-    // BPM → Frequency Conversion
-    double bpmToHz(double bpm)
-    {
-        if (bpm <= 0.0)
-            return 0.0;
-
-        // Division multiplier relative to 1 beat = quarter note
-        double multiplier = 1.0;
-
-        switch (divisionBox.getSelectedId())
-        {
-            case 1: multiplier = 0.25; break;  // whole note (4 beats per cycle)
-            case 2: multiplier = 0.5;  break;  // half note
-            case 3: multiplier = 1.0;  break;  // quarter note
-            case 4: multiplier = 2.0;  break;  // eighth
-            case 5: multiplier = 4.0;  break;  // sixteenth
-            case 6: multiplier = 8.0;  break;  // thirty-second
-            case 7: multiplier = 2.0 / 1.5; break;  // dotted ⅛ (triplet-based)
-            case 8: multiplier = 4.0 / 1.5; break;  // dotted 1/16
-            default: break;
-        }
-
-        // base beat frequency = beats per second
-        const double beatsPerSecond = bpm / 60.0;
-
-        // final LFO frequency in Hz
-        return beatsPerSecond * multiplier;
-    }
-
-    // Map EG value to MIDI
-    int mapEgToMidi(double egValue, int paramId)
-    {
-        const auto& param = syntaktParameters[paramId];
-
-        if (param.isBipolar)
-        {
-            // centered mapping
-            const double center = (param.minValue + param.maxValue) * 0.5;
-            const double range  = (param.maxValue - param.minValue) * 0.5;
-            return (int)(center + (egValue * 2.0 - 1.0) * range);
-        }
-        else
-        {
-            return (int)(param.minValue + egValue * (param.maxValue - param.minValue));
-        }
     }
 
     void openSelectedMidiOutput()
@@ -1903,31 +1197,4 @@ private:
             midiOut = juce::MidiOutput::openDevice(outputs[outIndex].identifier);
         }
     }
-
-    #if JUCE_DEBUG
-    void updateLfoRouteDebugLabel()
-    {
-        if (showRouteDebugLabel)
-        {
-            juce::String text;
-
-        text << "LFO Routes bipolar state:\n";
-
-        for (int i = 0; i < maxRoutes; ++i)
-        {
-            const auto& r = lfoRoutes[i];
-
-            text << "Route " << i
-                 << " | ch=" << r.midiChannel
-                 << " | param=" << r.parameterIndex
-                 << " | bipolar=" << (r.bipolar ? "TRUE" : "FALSE")
-                 << " | invert=" << (r.invertPhase ? "TRUE" : "FALSE")
-                 << " | oneShot=" << (r.oneShot ? "TRUE" : "FALSE")
-                 << "\n";
-        }
-
-        lfoRouteDebugLabel.setText(text, juce::dontSendNotification);
-        }
-    }
-    #endif
 };

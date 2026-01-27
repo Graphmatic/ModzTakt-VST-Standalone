@@ -15,7 +15,7 @@ public:
         addAndMakeVisible (mainComponent);
 
         // Choose a sensible initial size. You can match your standalone window later.
-        setSize (820, 560);
+        setSize (800, 540);
         setResizable(false, false);      // width only
         setResizeLimits(1000, 800, 1920, 800); // minW, minH, maxW, maxH
     }

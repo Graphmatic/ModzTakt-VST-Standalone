@@ -1,3 +1,8 @@
+#pragma once
+
+#include <JuceHeader.h>
+#include <atomic>
+
 struct PendingMidiFlags
 {
     std::atomic<int>   pendingNoteChannel  { 1 };
@@ -13,7 +18,7 @@ struct PendingMidiFlags
 template <typename ClockHandlerFn>
 inline void parseIncomingMidiBuffer (const juce::MidiBuffer& midiIn,
                                      PendingMidiFlags& pending,
-                                     int syncModeSelectedId,
+                                     bool syncEnabled,
                                      ClockHandlerFn&& handleIncomingClockMsg,
                                      bool noteRestartEnabled,
                                      bool noteOffStopEnabled)
@@ -22,10 +27,14 @@ inline void parseIncomingMidiBuffer (const juce::MidiBuffer& midiIn,
     {
         const auto msg = meta.getMessage();
 
-        // Preserve original gating
-        if (syncModeSelectedId == 2)
-            handleIncomingClockMsg (msg);
+        // Only feed realtime transport/clock into the clock handler
+        if (syncEnabled)
+        {
+            if (msg.isMidiClock() || msg.isMidiStart() || msg.isMidiStop() || msg.isMidiContinue())
+                handleIncomingClockMsg (msg);
+        }
 
+        // Note On
         if (msg.isNoteOn())
         {
             pending.pendingNoteChannel.store (msg.getChannel(), std::memory_order_relaxed);
@@ -33,10 +42,11 @@ inline void parseIncomingMidiBuffer (const juce::MidiBuffer& midiIn,
             pending.pendingNoteVelocity.store(msg.getFloatVelocity(), std::memory_order_relaxed);
             pending.pendingNoteOn.store (true, std::memory_order_release);
         }
+        // Note Off
         else if (msg.isNoteOff())
         {
             pending.pendingNoteChannel.store (msg.getChannel(), std::memory_order_relaxed);
-            pending.pendingNoteNumber.store  (msg.getNoteNumber(), std::memory_order_relaxed); // IMPORTANT: store note
+            pending.pendingNoteNumber.store  (msg.getNoteNumber(), std::memory_order_relaxed);
             pending.pendingNoteOff.store (true, std::memory_order_release);
 
             if (noteRestartEnabled && noteOffStopEnabled)
