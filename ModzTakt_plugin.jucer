@@ -28,10 +28,6 @@
     <FILE id="oJ54sh" name="EnvelopeComponent.h" compile="0" resource="0"
           file="Source/EnvelopeComponent.h"/>
     <FILE id="yREiW1" name="MidiInput.h" compile="0" resource="0" file="Source/MidiInput.h"/>
-    <FILE id="VmyYxV" name="MidiMonitorContent.h" compile="0" resource="0"
-          file="Source/MidiMonitorContent.h"/>
-    <FILE id="h0l9wq" name="MidiMonitorWindow.h" compile="0" resource="0"
-          file="Source/MidiMonitorWindow.h"/>
     <FILE id="ikFWi8" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
     <FILE id="kcSpYS" name="PluginEntry.cpp" compile="1" resource="0" file="Source/PluginEntry.cpp"/>
     <FILE id="t8fh26" name="PluginProcessor.h" compile="0" resource="0"

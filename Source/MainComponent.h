@@ -2,7 +2,6 @@
 #include <JuceHeader.h>
 #include "SyntaktParameterTable.h"
 #include "MidiInput.h"
-#include "MidiMonitorWindow.h"
 #include "EnvelopeComponent.h"
 #include "ScopeModalComponent.h"
 #include "Cosmetic.h"
@@ -127,7 +126,7 @@ public:
         );
 
         addAndMakeVisible (*noteRestartToggle);
-        noteRestartToggle->setToggleState (false, juce::dontSendNotification);
+        noteRestartToggle->setToggleState (false, juce::sendNotification);
         noteRestartToggle->setButtonText ("");
         // apvts
         noteRestartAttach = std::make_unique<ButtonAttachment>(apvts, "noteRestart", *noteRestartToggle);
@@ -138,15 +137,16 @@ public:
 
         addAndMakeVisible (noteRestartToggleLabel);
 
+        noteSourceChannelBox.setEnabled(false);
+
         addAndMakeVisible(noteSourceChannelBox);
-        noteSourceChannelBox.setTextWhenNothingSelected("Source Channel");
+        
+        // noteSourceChannelBox.setTextWhenNothingSelected("Source Channel");
+        for (int ch = 1; ch <= 16; ++ch)
+                noteSourceChannelBox.addItem("Ch " + juce::String(ch), ch);
+
         // apvts
         noteSourceChannelAttach = std::make_unique<ChoiceAttachment>(apvts, "noteSourceChannel", noteSourceChannelBox);
-
-        noteSourceChannelBox.onChange = [this]()
-        {
-            noteRestartChannel.store(noteSourceChannelBox.getSelectedId(), std::memory_order_release);
-        };
 
         noteRestartToggle->onClick = [this]()
         {
@@ -165,9 +165,17 @@ public:
                 }
             }
 
+            noteSourceChannelBox.setVisible(enabled);
+            noteSourceChannelBox.setEnabled(enabled);
+            addAndMakeVisible(noteSourceChannelBox);
+
+
             // Stop-on-Note-Off UI logic
             noteOffStopToggle->setVisible(enabled);
             noteOffStopToggle->setEnabled(enabled);
+
+            noteOffStopToggleLabel.setVisible(enabled);
+
             addAndMakeVisible(*noteOffStopToggle);
             addAndMakeVisible (noteOffStopToggleLabel);
 
@@ -177,7 +185,6 @@ public:
                 noteOffStopToggle->setVisible(enabled);
                 noteOffStopToggle->setEnabled(enabled);
                 noteOffStopToggleLabel.setVisible(enabled);
-
             }
 
             // layout refresh
@@ -200,16 +207,6 @@ public:
         noteOffStopToggleLabel.setText ("Stop on Note-Off", juce::dontSendNotification);
         noteOffStopToggleLabel.setJustificationType (juce::Justification::centredLeft);
         noteOffStopToggleLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
-
-
-        // Debug labels
-        #if JUCE_DEBUG
-        noteDebugTitle.setText("Detected Note-On:", juce::dontSendNotification);
-        addAndMakeVisible(noteDebugTitle);
-        noteDebugLabel.setText("--", juce::dontSendNotification);
-        noteDebugLabel.setColour(juce::Label::textColourId, juce::Colours::aqua);
-        addAndMakeVisible(noteDebugLabel);
-        #endif
 
         // LFO routes checkbox labels
         bipolarLabel.setText("+/-", juce::dontSendNotification);
@@ -294,8 +291,8 @@ public:
                 const bool noteRestartOn = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
                 routeOneShotToggles[i]->setVisible(enabled && noteRestartOn);
 
-                // Initialize note source channel list
-                updateNoteSourceChannel();
+                // // Initialize note source channel list
+                // updateNoteSourceChannel();
         
                 // Layout update
                 juce::MessageManager::callAsync([this]() { resized(); });
@@ -328,12 +325,6 @@ public:
             const bool noteRestartNow = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
             routeOneShotToggles[i]->setVisible(enabledNow && noteRestartNow);
         }
-
-        // Initialize note source channel list
-        updateNoteSourceChannel();
-
-        // Initialize the atomic variable with current selection
-        noteRestartChannel.store(noteSourceChannelBox.getSelectedId(), std::memory_order_release);
 
         // scope image button
         scopeIcon = juce::ImageCache::getFromMemory(
@@ -429,36 +420,6 @@ public:
 
         //MIDI MONITOR
         #if JUCE_DEBUG
-        addAndMakeVisible(midiMonitorButton);
-
-        midiMonitorButton.setToggleable(true);
-        midiMonitorButton.setClickingTogglesState(true);
-
-        midiMonitorButton.onClick = [this]()
-        {
-            if (midiMonitorButton.getToggleState())
-            {
-                if (midiMonitorWindow == nullptr)
-                    midiMonitorWindow = std::make_unique<MidiMonitorWindow>();
-
-                midiMonitorWindow->setVisible(true);
-                midiMonitorWindow->toFront(true);
-            }
-            else
-            {
-                if (midiMonitorWindow != nullptr)
-                    midiMonitorWindow->setVisible(false);
-            }
-        };
-
-        //bipolar check
-        addAndMakeVisible(lfoRouteDebugLabel);
-        lfoRouteDebugLabel.setJustificationType(juce::Justification::topLeft);
-        lfoRouteDebugLabel.setFont(juce::Font(juce::FontOptions()
-                                                    .withHeight(12.0f)
-                                            ));
-
-        lfoRouteDebugLabel.setColour(juce::Label::textColourId, juce::Colours::yellow);
 
         //EG check in ScopeRoute[0]
         addAndMakeVisible(showEGinScopeToggle);
@@ -471,14 +432,13 @@ public:
         #endif
 
         // Timer
-        startTimerHz(100); // 100Hz refresh  
+        startTimerHz(30); // 100Hz refresh  
     }
 
     ~MainComponent() override
     {
         stopTimer();
-        midiClock.stop();
-        midiOut.reset();
+
         rateSlider.setLookAndFeel (nullptr);
         depthSlider.setLookAndFeel (nullptr);
 
@@ -719,18 +679,6 @@ public:
         if (noteOffStopToggle->isVisible())
             placeSingleToggleRow(*noteOffStopToggle, noteOffStopToggleLabel);
 
-        #if JUCE_DEBUG
-        auto placeDebugRow = [&](juce::Label& title, juce::Label& midiValues)
-        {
-            auto row = lfoAreaContent.removeFromTop(rowHeight);
-            title.setBounds(row.removeFromLeft(labelWidth));
-            row.removeFromLeft(spacing);
-            midiValues.setBounds(row);
-            lfoAreaContent.removeFromTop(6);
-        };
-        placeDebugRow(noteDebugTitle, noteDebugLabel);
-        #endif
-
         constexpr int marginScope = 8;
         constexpr int scopeButtonSize = 40;
 
@@ -768,36 +716,9 @@ public:
         settingsButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::darkgrey.withAlpha(0.3f));
         settingsButton.setClickingTogglesState(false);
 
-        //MIDI MONITOR
-        #if JUCE_DEBUG
-        auto areaMon = getLocalBounds();
-
-        constexpr int buttonWidth  = 110;
-        constexpr int buttonHeight = 22;
-        constexpr int margin       = 8;
-        constexpr int marginLeft   = 500;
-
-        midiMonitorButton.setBounds(
-            areaMon.getRight() - buttonWidth  - marginLeft,
-            areaMon.getBottom() - buttonHeight - margin,
-            buttonWidth,
-            buttonHeight
-        );
-
-        // bipolar check
-        if (showRouteDebugLabel)
-            lfoRouteDebugLabel.setBounds(10, getHeight() - 120, 300, 100);
-        #endif
-
         // Envelop generator frame
         if (envelopeComponent != nullptr)
             envelopeComponent->setBounds(egColumn);
-    }
-
-    void postJuceInit()
-    {
-        refreshMidiInputs();
-        refreshMidiOutputs();
     }
 
     // Oscilloscope pop-up view (not modal)
@@ -864,11 +785,11 @@ private:
 
     juce::GroupComponent lfoGroup;
 
-    juce::Label midiOutputLabel, midiInputLabel, syncModeLabel;
+    juce::Label syncModeLabel;
     juce::Label bpmLabelTitle, bpmLabel, divisionLabel;
     juce::Label parameterLabel, shapeLabel, rateLabel, depthLabel, channelLabel, bipolarLabel, invertPhaseLabel, oneShotLabel;
 
-    juce::ComboBox midiOutputBox, midiInputBox, syncModeBox, divisionBox; //////divbox
+    juce::ComboBox syncModeBox, divisionBox; //////divbox
     juce::ComboBox shapeBox; ////////////
 
     // SLiders
@@ -884,32 +805,7 @@ private:
 
     juce::TextButton startButton;
 
-    // MIDI
-    std::unique_ptr<juce::MidiOutput> midiOut;
-    MidiClockHandler midiClock;
-
-    std::unique_ptr<juce::MidiInput> globalMidiInput;
-    std::unique_ptr<juce::MidiInputCallback> midiCallback;
-
-    std::atomic<bool> pendingNoteOn { false };
-    std::atomic<bool> pendingNoteOff { false };
-    std::atomic<int>  pendingNoteChannel { 0 };
-    std::atomic<int>  pendingNoteNumber { 0 };
-    std::atomic<float>  pendingNoteVelocity { 0 };
-
-    std::atomic<int> noteRestartChannel { 0 }; // 1–16, 0 = disabled
-
-    std::atomic<bool> requestLfoRestart { false };
-    std::atomic<bool> requestLfoStop { false };
-
-    bool syncEnabled = false;
-
-    //DEBUG
-    #if JUCE_DEBUG
-    // Debug: show last Note-On received
-    juce::Label noteDebugTitle { {}, "Last Note-On:" };
-    juce::Label noteDebugLabel;
-    #endif
+    bool syncEnabled = false; // for BPM display
 
     // Multi-CC Routing
     static constexpr int maxRoutes = 3;
@@ -931,27 +827,11 @@ private:
     std::unique_ptr<LedToggleButton> routeBipolarToggles[maxRoutes], routeInvertToggles[maxRoutes], routeOneShotToggles[maxRoutes];
 
     #if JUCE_DEBUG
-    std::unique_ptr<MidiMonitorWindow> midiMonitorWindow;
-    juce::TextButton midiMonitorButton { "MIDI Monitor" };
-
-    //bipolar check
-    juce::Label lfoRouteDebugLabel;
-    bool showRouteDebugLabel = false;
-
     // EG test: to scope Route 0.
     juce::ToggleButton showEGinScopeToggle{ "EG to Scope" };
 
     bool showEGinScope = false;
     #endif
-
-    enum class LfoShape
-    {
-        Sine = 1,
-        Triangle,
-        Square,
-        Saw,
-        Random
-    };
 
     // Setting Pop-Up
     juce::TextButton settingsButton;
@@ -962,13 +842,13 @@ private:
     using ButtonAttachment  = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ChoiceAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    std::unique_ptr<ButtonAttachment> lfoActiveAttach;  // juce::TextButton startButton;
-    std::unique_ptr<SliderAttachment> rateAttach, depthAttach;  // juce::Slider rateSlider, depthSlider;
-    std::unique_ptr<ChoiceAttachment> shapeAttach;  // juce::ComboBox shapeBox;
-    std::unique_ptr<ChoiceAttachment> syncModeAttach; // juce::ComboBox syncModeBox
-    std::unique_ptr<ButtonAttachment> noteRestartAttach, noteOffStopAttach; // std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle;
-    std::unique_ptr<ChoiceAttachment> noteSourceChannelAttach; // juce::ComboBox noteSourceChannelBox;
-    std::unique_ptr<ChoiceAttachment> syncDivisionAttach; // juce::ComboBox divisionBox
+    std::unique_ptr<ButtonAttachment> lfoActiveAttach;
+    std::unique_ptr<SliderAttachment> rateAttach, depthAttach;
+    std::unique_ptr<ChoiceAttachment> shapeAttach;
+    std::unique_ptr<ChoiceAttachment> syncModeAttach;
+    std::unique_ptr<ButtonAttachment> noteRestartAttach, noteOffStopAttach;
+    std::unique_ptr<ChoiceAttachment> noteSourceChannelAttach;
+    std::unique_ptr<ChoiceAttachment> syncDivisionAttach;
 
     //LFO Routes UI
     std::array<std::unique_ptr<ChoiceAttachment>, 3> routeChannelAttach;
@@ -977,16 +857,6 @@ private:
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeBipolarAttach;
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeInvertAttach;
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeOneShotAttach;
-
-    // LFO State
-    double phase = 0.0;
-    double sampleRate = 100.0;
-    juce::Random random;
-    bool lfoActive = false;
-
-    bool oneShotActive = false;
-
-    double oneShotPhaseAccum = 0.0;
 
     bool lastWasRandomShape = false;
 
@@ -1006,11 +876,9 @@ private:
     std::unique_ptr<EnvelopeComponent> envelopeComponent;
 
     // settings - Dithering and MIDI throttle
-    std::unordered_map<int, int> lastSentValuePerParam;  // key: param ID or CC number
     int changeThreshold = 1; // difference needed before sending
 
     // settings - Anti flooding
-    std::unordered_map<int, double> lastSendTimePerParam;
     double msFloofThreshold = 0.0; // delay between Midi datas chunk
 
     void parameterChanged (const juce::String& paramID, float newValue) override
@@ -1022,87 +890,30 @@ private:
         }
     }
 
-    //MIDI MONITOR
-    #if JUCE_DEBUG
-    void settingsButtonClicked()
-    {
-        if (midiMonitorWindow == nullptr)
-        {
-            midiMonitorWindow = std::make_unique<MidiMonitorWindow>();
-        }
-
-        midiMonitorWindow->setVisible(true);
-        midiMonitorWindow->toFront(true);
-    }
-    #endif
-
-    void updateNoteSourceChannel()
-    {
-        // Store current selection before clearing
-        const int currentSelection = noteSourceChannelBox.getSelectedId();
-        
-        // Clear without triggering onChange
-        noteSourceChannelBox.clear(juce::dontSendNotification);
-
-        juce::Array<int> activeChannels;
-
-        for (int i = 0; i < maxRoutes; ++i)
-        {
-            const auto rs = juce::String(i);
-            int channelIsActive = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16=Ch1..16
-           
-            // Collect unique active MIDI channels from routes
-            if (channelIsActive > 0 && !activeChannels.contains(channelIsActive))
-                activeChannels.add(channelIsActive);
-        }
-        
-        // Populate selector
-        for (int ch : activeChannels)
-            noteSourceChannelBox.addItem("Ch " + juce::String(ch), ch);
-
-        // Restore previous selection if possible, otherwise select first
-        int newSelection = 0;
-        if (activeChannels.contains(currentSelection))
-        {
-            newSelection = currentSelection;
-            noteSourceChannelBox.setSelectedId(currentSelection, juce::dontSendNotification);
-        }
-        else if (!activeChannels.isEmpty())
-        {
-            newSelection = activeChannels[0];
-            noteSourceChannelBox.setSelectedId(activeChannels[0], juce::dontSendNotification);
-        }
-        
-        // IMPORTANT: Update the atomic variable since onChange won't fire with dontSendNotification
-        noteRestartChannel.store(newSelection, std::memory_order_release);
-    }
-
-    void refreshMidiOutputs()
-    {
-        midiOutputBox.clear();
-        auto devices = juce::MidiOutput::getAvailableDevices();
-        for (int i = 0; i < devices.size(); ++i)
-            midiOutputBox.addItem(devices[i].name, i + 1);
-        #if JUCE_DEBUG
-            midiOutputBox.setSelectedId(1);
-        #endif
-    }
-
-    void refreshMidiInputs()
-    {
-        midiInputBox.clear();
-        auto devices = juce::MidiInput::getAvailableDevices();
-        for (int i = 0; i < devices.size(); ++i)
-            midiInputBox.addItem(devices[i].name, i + 1);
-        #if JUCE_DEBUG
-            midiInputBox.setSelectedId(3);
-        #endif
-    }
-
     // Timer Callback
     void timerCallback() override
     {
         // UI update
+        const bool lfoRunning = processor.isLfoRunningForUi();
+
+        const juce::String lfoStartStopText = lfoRunning ? "Stop LFO" : "Start LFO";
+        if (startButton.getButtonText() != lfoStartStopText)
+            startButton.setButtonText(lfoStartStopText);
+
+        if (processor.uiRequestSetLfoActiveOn.exchange(false, std::memory_order_acq_rel))
+        {
+            if (auto* p = apvts.getParameter("lfoActive"))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost(1.0f);  // turn ON
+                p->endChangeGesture();
+            }
+        }
+
+        // //Optional: also reflect toggle state visually if you want:
+        // startButton.setToggleState(processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f,
+        //                            juce::dontSendNotification);
+
         const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
         startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
 
@@ -1145,56 +956,39 @@ private:
             }
         }
 
-        if (!midiOut)
-            return;
-
-        // LFO
-        const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
-        const double bpm = midiClock.getCurrentBPM();
-        int egValue;
+        // Display bpm TODO
+        // const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
+        // const double bpm = midiClock.getCurrentBPM();
 
         // Always update BPM display if sync mode is active
-        if (syncEnabled)
-        {
-            const double bpm = midiClock.getCurrentBPM();
-            const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+        // if (syncEnabled)
+        // {
+        //     const double bpm = midiClock.getCurrentBPM();
+        //     const auto nowMs = juce::Time::getMillisecondCounterHiRes();
 
-            if (bpm > 0.0)
-            {
-                // Smooth & rate-limit UI updates
-                displayedBpm = 0.9 * displayedBpm + 0.1 * bpm;
-                if (nowMs - lastBpmUpdateMs > 250.0)
-                {
-                    bpmLabel.setText(juce::String(displayedBpm, 1), juce::dontSendNotification);
-                    lastBpmUpdateMs = nowMs;
-                }
-            }
-            else
-            {
-                // No clock yet: show placeholder
-                if (nowMs - lastBpmUpdateMs > 500.0)
-                {
-                    bpmLabel.setText("--", juce::dontSendNotification);
-                    lastBpmUpdateMs = nowMs;
-                }
-            }
-        }
-        else
-        {
-            // When not in sync mode, just freeze BPM display
-        }
-    }
-
-    void openSelectedMidiOutput()
-    {
-        midiOut.reset();
-
-        auto outputs = juce::MidiOutput::getAvailableDevices();
-        const int outIndex = midiOutputBox.getSelectedId() - 1;
-
-        if (outIndex >= 0 && outIndex < outputs.size())
-        {
-            midiOut = juce::MidiOutput::openDevice(outputs[outIndex].identifier);
-        }
+        //     if (bpm > 0.0)
+        //     {
+        //         // Smooth & rate-limit UI updates
+        //         displayedBpm = 0.9 * displayedBpm + 0.1 * bpm;
+        //         if (nowMs - lastBpmUpdateMs > 250.0)
+        //         {
+        //             bpmLabel.setText(juce::String(displayedBpm, 1), juce::dontSendNotification);
+        //             lastBpmUpdateMs = nowMs;
+        //         }
+        //     }
+        //     else
+        //     {
+        //         // No clock yet: show placeholder
+        //         if (nowMs - lastBpmUpdateMs > 500.0)
+        //         {
+        //             bpmLabel.setText("--", juce::dontSendNotification);
+        //             lastBpmUpdateMs = nowMs;
+        //         }
+        //     }
+        // }
+        // else
+        // {
+        //     // When not in sync mode, just freeze BPM display
+        // }
     }
 };

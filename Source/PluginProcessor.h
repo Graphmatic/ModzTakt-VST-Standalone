@@ -81,6 +81,17 @@ public:
         // Snapshot incoming MIDI before we append generated events
         const juce::MidiBuffer midiIn = midi;
 
+        midi.clear();
+
+        // pass through everything EXCEPT notes
+        for (const auto meta : midiIn)
+        {
+            const auto msg = meta.getMessage();
+            if (! msg.isNoteOnOrOff())
+                midi.addEvent(msg, meta.samplePosition);
+        }
+
+
         const double blockStartMs = timeMs;
 
         const double blockDurationMs = 1000.0 * (double) audio.getNumSamples()
@@ -93,9 +104,7 @@ public:
         // for throttling / scheduling when needed.
 
         // --- Read APVTS ---
-        const auto shape = static_cast<LfoShape>(
-            (int) apvts.getRawParameterValue("lfoShape")->load() + 1
-        );
+        const auto shape = static_cast<LfoShape>( (int) apvts.getRawParameterValue("lfoShape")->load() + 1 );
 
         const bool lfoActiveParam = apvts.getRawParameterValue("lfoActive")->load() > 0.5f;
 
@@ -106,8 +115,14 @@ public:
         const bool syncEnabled = (syncModeId == 2);
 
         const bool noteRestartToggleState = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
+        if (!noteRestartToggleState)
+            lfoForcedActiveByNote = false;
+
         const bool noteOffStopToggleState = apvts.getRawParameterValue("noteOffStop")->load() > 0.5f;
-        const int  noteSourceChannel      = (int) apvts.getRawParameterValue("noteSourceChannel")->load();
+
+        const int noteSourceChoice = (int) apvts.getRawParameterValue("noteSourceChannel")->load(); // 0..15
+        const int noteSourceChannel = noteSourceChoice + 1; // 1..16
+
         const int  syncDivisionId         = (int) apvts.getRawParameterValue("syncDivision")->load();
 
         // --- Parse incoming MIDI into pending flags (note on/off, requestLfoStop, etc.) ---
@@ -128,8 +143,17 @@ public:
         // --- Sync route params into engine state ---
         syncRoutesFromApvts (shape);
 
+        // Detect user toggling OFF (explicit stop) and clear forced-run
+        if (lastLfoActiveParam && !lfoActiveParam)
+        {
+            lfoForcedActiveByNote = false;  // <- critical
+            lfoRuntimeMuted = false;        // optional: clear mute too so next start works cleanly
+        }
+        lastLfoActiveParam = lfoActiveParam;
+
         // --- Apply LFO Active state (resets phases on edge) ---
-        applyLfoActiveState (lfoActiveParam, shape);
+        const bool shouldRunLfo = (lfoActiveParam || lfoForcedActiveByNote);
+        applyLfoActiveState (shouldRunLfo, shape);
 
         // 1) NOTE ON
         if (pending.pendingNoteOn.exchange(false, std::memory_order_acq_rel))
@@ -143,8 +167,21 @@ public:
                 envelopeComponent->noteOn (ch, note, velocity);
 
             // --- LFO Note Restart ---
-            if (noteRestartToggleState && noteSourceChannel > 0 && ch == noteSourceChannel)
-                requestLfoRestart.store (true, std::memory_order_release);
+            if (noteRestartToggleState)
+            {
+                const bool matchesSource =
+                    (noteSourceChannel <= 0) ? true : (ch == noteSourceChannel);
+
+                if (matchesSource)
+                {
+                    if (!lfoActiveParam)
+                        uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
+
+                    lfoForcedActiveByNote = true;  // <--- NEW
+                    requestLfoRestart.store (true, std::memory_order_release);
+                }
+            }
+
 
             // (UI debug label removed: cannot touch UI from audio thread)
         }
@@ -163,8 +200,8 @@ public:
         if (pending.requestLfoStop.exchange(false, std::memory_order_acq_rel))
         {
             lfoRuntimeMuted = true;
+            lfoForcedActiveByNote = false;   // <--- NEW (so it truly stops)
 
-            // reset phases for next start
             for (int i = 0; i < maxRoutes; ++i)
             {
                 lfoRoutes[i].hasFinishedOneShot = false;
@@ -329,6 +366,25 @@ public:
 
         // Advance global time after processing the block
         timeMs = blockStartMs + blockDurationMs;
+
+        bool anyRouteEnabled = false;
+        bool anyRouteStillProducing = false;
+
+        for (int i = 0; i < maxRoutes; ++i)
+        {
+            const auto& r = lfoRoutes[i];
+            if (r.midiChannel <= 0 || r.parameterIndex < 0)
+                continue;
+
+            anyRouteEnabled = true;
+
+            if (!r.oneShot || !r.hasFinishedOneShot)
+                anyRouteStillProducing = true;
+        }
+
+        const bool runningNow = (lfoActive && !lfoRuntimeMuted && anyRouteEnabled && anyRouteStillProducing);
+        uiLfoIsRunning.store(runningNow, std::memory_order_release);
+
     }
 
     //==============================================================================
@@ -377,6 +433,14 @@ public:
     inline void handleMidiStop() override  { transportStopPending.store(true, std::memory_order_release); }
     inline void handleMidiContinue() override {}
 
+    // LFO Start/Stop label refresh
+    bool isLfoRunningForUi() const noexcept
+    {
+        return uiLfoIsRunning.load(std::memory_order_acquire);
+    }
+
+    std::atomic<bool> uiRequestSetLfoActiveOn { false };
+
 private:
     //==============================================================================
     // APVTS layout
@@ -413,7 +477,7 @@ private:
 
         // Note restart feature
         p.push_back (std::make_unique<juce::AudioParameterBool>("noteRestart", "Note Restart", false));
-        p.push_back (std::make_unique<juce::AudioParameterInt>("noteSourceChannel", "Note Restart Channel", 0, 16, 0));
+        p.push_back (std::make_unique<juce::AudioParameterInt>("noteSourceChannel", "Note Restart Channel", 0, 17, 0));
         p.push_back (std::make_unique<juce::AudioParameterBool>("noteOffStop", "Stop on Note Off", false));
 
         //LFO routes
@@ -904,11 +968,18 @@ private:
     double currentBlockStartMs = 0.0;
     double msPerSample = 0.0;
 
+    bool lfoForcedActiveByNote = false;
+
+    std::atomic<bool> uiLfoIsRunning { false };
+
+    bool lastLfoActiveParam = false;
+    
+
+
     std::unique_ptr<EnvelopeComponent> envelopeComponent;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModzTaktAudioProcessor)
 };
-
 
 // declare factory (defined in PluginEntry.cpp)
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
