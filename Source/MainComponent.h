@@ -890,7 +890,6 @@ private:
         }
     }
 
-    // Timer Callback
     void timerCallback() override
     {
         // UI update
@@ -909,10 +908,6 @@ private:
                 p->endChangeGesture();
             }
         }
-
-        // //Optional: also reflect toggle state visually if you want:
-        // startButton.setToggleState(processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f,
-        //                            juce::dontSendNotification);
 
         const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
         startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
@@ -934,12 +929,12 @@ private:
 
                 if (isRandom)
                 {
-                    bipolar->setToggleState(false, juce::dontSendNotification); // do not update actual flag! so:
+                    bipolar->setToggleState(false, juce::sendNotification); // do not update actual flag! so:
                     // TODO : UPDATE routes flags explicitely so Random always bypass bipolar/phase
                     bipolar->setEnabled(false);
                     bipolar->setAlpha(0.8f);
 
-                    invert->setToggleState(false, juce::dontSendNotification);
+                    invert->setToggleState(false, juce::sendNotification);
                     // TODO : UPDATE routes flags explicitely so Random always bypass bipolar/phase
 
                     invert->setEnabled(false);
