@@ -929,14 +929,11 @@ private:
 
                 if (isRandom)
                 {
-                    bipolar->setToggleState(false, juce::sendNotification); // do not update actual flag! so:
-                    // TODO : UPDATE routes flags explicitely so Random always bypass bipolar/phase
+                    bipolar->setToggleState(false, juce::sendNotification);
                     bipolar->setEnabled(false);
                     bipolar->setAlpha(0.8f);
 
                     invert->setToggleState(false, juce::sendNotification);
-                    // TODO : UPDATE routes flags explicitely so Random always bypass bipolar/phase
-
                     invert->setEnabled(false);
                     invert->setAlpha(0.8f);
                 }

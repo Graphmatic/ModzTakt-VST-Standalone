@@ -27,6 +27,7 @@
     <FILE id="adaQwH" name="Cosmetic.h" compile="0" resource="0" file="Source/Cosmetic.h"/>
     <FILE id="oJ54sh" name="EnvelopeComponent.h" compile="0" resource="0"
           file="Source/EnvelopeComponent.h"/>
+    <FILE id="MeCTdH" name="LfoComponent.h" compile="0" resource="0" file="Source/LfoComponent.h"/>
     <FILE id="yREiW1" name="MidiInput.h" compile="0" resource="0" file="Source/MidiInput.h"/>
     <FILE id="ikFWi8" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
     <FILE id="kcSpYS" name="PluginEntry.cpp" compile="1" resource="0" file="Source/PluginEntry.cpp"/>
