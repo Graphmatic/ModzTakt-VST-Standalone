@@ -27,6 +27,8 @@ namespace modztakt::lfo
         // runtime state
         bool hasFinishedOneShot = false;
         bool passedPeak = false;
+
+        double totalPhaseAdvanced = 0.0;  // ADD THIS
     };
 
     // Cache last route settings to detect changes (so we can reset oneshot/phase only when needed)
@@ -78,8 +80,6 @@ namespace modztakt::lfo
 
         inline double lfoRandom (double phase, juce::Random& rng)
     {
-        // NOTE: this matches your existing logic, but static state means one random stream shared.
-        // We'll refine later to be per-route.
         static double lastPhase = 0.0;
         static double lastValue = 0.0;
 
@@ -265,7 +265,7 @@ namespace modztakt::lfo
                 r.hasFinishedOneShot = false;
                 r.passedPeak = false;
 
-                // Optional: re-align phase when the *shape/mode* changes,
+                // Re-align phase when the *shape/mode* changes,
                 // or when route is re-enabled.
                 const bool routeBecameEnabled = (prev.midiChannel == 0 && now.midiChannel != 0);
                 if (modeChanged || routeBecameEnabled)
@@ -291,7 +291,7 @@ namespace modztakt::lfo
 
         lfoActive = shouldBeActive;
 
-        // When turning ON: reset phases + one-shot state (old toggleLFO logic)
+        // When turning ON: reset phases + one-shot state
         if (lfoActive)
         {
             lfoRuntimeMuted = false;
@@ -304,6 +304,7 @@ namespace modztakt::lfo
 
                 route.hasFinishedOneShot = false;
                 route.passedPeak = false;
+                route.totalPhaseAdvanced = 0.0;
             }
         }
         else

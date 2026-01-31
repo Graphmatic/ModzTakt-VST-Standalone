@@ -909,6 +909,17 @@ private:
             }
         }
 
+        if (processor.uiRequestSetLfoActiveOff.exchange(false, std::memory_order_acq_rel))
+        {
+            if (auto* p = apvts.getParameter("lfoActive"))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost(0.0f);
+                p->endChangeGesture();
+            }
+        }
+
+
         const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
         startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
 

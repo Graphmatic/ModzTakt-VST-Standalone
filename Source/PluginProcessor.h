@@ -6,8 +6,8 @@
 
 #include "MidiInParse.h"
 #include "SyntaktParameterTable.h"
-#include "MidiInput.h"          // where MidiClock lives in your repo
-#include "EnvelopeComponent.h"  // if you still use it for now
+#include "MidiInput.h"
+#include "EnvelopeComponent.h"
 #include "LfoComponent.h"
 
 // Forward declare editor
@@ -58,7 +58,7 @@ public:
                 (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
 
     useHostClock = !isStandaloneWrapper; // plugin = host clock, standalone = device clock
-        // If you later create an engine, prepare it here.
+        // If audio added:
         // engine.prepare(cachedSampleRate, cachedBlockSize);
     }
 
@@ -103,30 +103,22 @@ public:
         // timeMs is advanced at the end of the block so we can compute per-sample timestamps
         // for throttling / scheduling when needed.
 
-        // there is no global bypass in UI, LFO is enabled only with "lfoActive" button
-        // const bool globalEnabled = apvts.getRawParameterValue("enabled")->load() > 0.5f;
-        
-        // if (!globalEnabled)
-        //     return; // or just don't emit MIDI
-
         const bool lfoActiveParam = apvts.getRawParameterValue("lfoActive")->load() > 0.5f;
         //xx const int shapeSelectedId = (int) apvts.getRawParameterValue("lfoShape")->load() + 1; // back to your old 1..5 if you still use that
 
-        const auto shape = static_cast<LfoShape>(
-            (int) apvts.getRawParameterValue("lfoShape")->load() + 1
-        ); // or however you map it
+        const auto shape = static_cast<LfoShape>( (int) apvts.getRawParameterValue("lfoShape")->load() + 1 );
 
         modztakt::lfo::syncRoutesFromApvts<maxRoutes> (apvts, shape, lfoRoutes, lastRouteSnapshot, lfoPhase);
 
         // Detect user toggling OFF (explicit stop) and clear forced-run
         if (lastLfoActiveParam && !lfoActiveParam)
         {
-            lfoForcedActiveByNote = false;  // <- critical
-            lfoRuntimeMuted = false;        // optional: clear mute too so next start works cleanly
+            lfoForcedActiveByNote = false;
+            lfoRuntimeMuted = false;
         }
         lastLfoActiveParam = lfoActiveParam;
 
-        // --- Apply LFO Active state (resets phases on edge) ---
+        // Apply LFO Active state (resets phases)
         const bool shouldRunLfo = (lfoActiveParam || lfoForcedActiveByNote);
 
         modztakt::lfo::applyLfoActiveState (shouldRunLfo,
@@ -141,8 +133,6 @@ public:
 
         const int syncModeId = ((int) apvts.getRawParameterValue("syncMode")->load()) + 1;
         const bool syncEnabled = (syncModeId == 2);
-
-        
 
         const bool noteRestartToggleState = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
         if (!noteRestartToggleState)
@@ -167,7 +157,7 @@ public:
             bool invert  = apvts.getRawParameterValue("route" + rs + "_invert")->load()  > 0.5f;
             bool oneShot = apvts.getRawParameterValue("route" + rs + "_oneshot")->load() > 0.5f;
 
-            // Optional: if Random shape, force these off (engine constraint)
+            // if Random shape, force these off
             if (shape == LfoShape::Random)
             {
                 bipolar = false;
@@ -221,10 +211,12 @@ public:
 
                     lfoForcedActiveByNote = true;  // <--- NEW
                     requestLfoRestart.store (true, std::memory_order_release);
+                    for (int i = 0; i < maxRoutes; ++i)
+                    {
+                        lfoRoutes[i].totalPhaseAdvanced = 0.0;
+                    }
                 }
             }
-
-            // (UI debug label removed: cannot touch UI from audio thread)
         }
 
         // 2) NOTE OFF
@@ -245,19 +237,19 @@ public:
 
             for (int i = 0; i < maxRoutes; ++i)
             {
-                lfoRoutes[i].hasFinishedOneShot = false;
-                lfoRoutes[i].passedPeak = false;
+                lfoRoutes[i].totalPhaseAdvanced = 0.0;
+                lfoRoutes[i].hasFinishedOneShot = true;
+                lfoRoutes[i].passedPeak = true;
             }
         }
 
         // 4) LFO core variables (same as timerCallback)
-        //const bool syncEnabled = (syncModeSelectedId == 2);
         const double bpm = midiClock.getCurrentBPM();
 
         // Handle pending retrigger from Note-On
         if (requestLfoRestart.exchange(false, std::memory_order_acq_rel))
         {
-            lfoRuntimeMuted = false; // <-- IMPORTANT: restart should un-mute
+            lfoRuntimeMuted = false;
 
             for (int i = 0; i < maxRoutes; ++i)
             {
@@ -267,13 +259,12 @@ public:
 
                 route.hasFinishedOneShot = false;
                 route.passedPeak = false;
+                route.totalPhaseAdvanced = 0.0;
             }
 
             if (! lfoActive)
                 lfoActive = true;
         }
-
-        // (BPM label updates removed: UI must poll processor state instead)
 
         // LFO generation + send (writes into `midi`)
         if (lfoActive && !lfoRuntimeMuted)
@@ -286,7 +277,6 @@ public:
             // IMPORTANT: timerCallback used phaseInc = rateHz / sampleRate;
             // sampleRate in plugin is per-sample. We have numSamples in this block:
             const double phaseIncPerSample = rateHz / juce::jmax(1.0, getSampleRate());
-            //const auto shapeId = static_cast<LfoShape>(shapeSelectedId);
 
             // ---- Sub-stepped LFO tick ----
             // In the old standalone UI, the LFO advanced once per timer tick.
@@ -298,7 +288,7 @@ public:
 
             // Choose a step size (in samples). Smaller step = smoother but more MIDI events.
             // This keeps modulation smooth without going per-sample.
-            int stepSamples = (int) std::round (juce::jmax (1.0, getSampleRate()) / juce::jmax (0.001, rateHz) / 64.0);
+            int stepSamples = (int) std::round (juce::jmax (1.0, getSampleRate()) / juce::jmax (0.001, rateHz) / 128.0); //edit last var: 64=stepper / 256=smoother
             stepSamples = juce::jlimit (8, 128, stepSamples);
             stepSamples = juce::jlimit (1, juce::jmax (1, blockSize), stepSamples);
 
@@ -317,24 +307,23 @@ public:
                     if (route.oneShot && route.hasFinishedOneShot)
                         continue;
 
-                    const bool wrapped = modztakt::lfo::advancePhase (lfoPhase[i], phaseIncPerSample * audio.getNumSamples());
-                    // ^^^^^ IMPORTANT CHANGE:
-                    // timerCallback advanced once per timer tick; now we advance several times per block.
-                    // We increment phase by (phaseIncPerSample * stepThis) so speed stays correct.
-
-                    const double shapeComputed = computeWaveform (shape,
+                    // Accumulate before advancing
+                    route.totalPhaseAdvanced += phaseIncThis;
+                    
+                    const bool wrapped = modztakt::lfo::advancePhase (lfoPhase[i], phaseIncThis);
+                    
+                    const double shapeComputed = modztakt::lfo::computeWaveform (shape,
                                                           lfoPhase[i],
                                                           route.bipolar,
                                                           route.invertPhase,
                                                           random);
 
-                    // One-shot logic (unchanged)
-                    // In processBlock, replace lines 4697-4712:
-                    if (route.oneShot && wrapped)
+                    // One-shot: complete after full cycle
+                    if (route.oneShot && route.totalPhaseAdvanced >= 1.0)
                     {
                         route.hasFinishedOneShot = true;
                     }
-
+                    
                     const auto& param = syntaktParameters[route.parameterIndex];
                     const double depth = depthSliderValue;
 
@@ -360,6 +349,47 @@ public:
                     // Scope tap
                     // (If you keep lfoRoutesToScope[], preserve it similarly in processor)
                     // lastLfoRoutesValues[i].store((float)(shape * depth), std::memory_order_relaxed);
+                }
+            }
+
+            // AUTO-STOP AFTER ONE-SHOT
+            {
+                bool anyEnabledRoute = false;
+                bool anyRouteStillRunning = false;
+
+                for (int i = 0; i < maxRoutes; ++i)
+                {
+                    const auto& r = lfoRoutes[i];
+
+                    if (r.midiChannel <= 0 || r.parameterIndex < 0)
+                        continue;
+
+                    anyEnabledRoute = true;
+
+                    // If any enabled route is NOT one-shot, LFO should keep running
+                    if (!r.oneShot)
+                    {
+                        anyRouteStillRunning = true;
+                        break;
+                    }
+
+                    // Enabled + one-shot: still running until finished
+                    if (!r.hasFinishedOneShot)
+                    {
+                        anyRouteStillRunning = true;
+                        break;
+                    }
+                }
+
+                // Only auto-stop if we had something enabled and all enabled routes were one-shot and finished
+                if (anyEnabledRoute && !anyRouteStillRunning)
+                {
+                    // stop producing values
+                    lfoRuntimeMuted = true;
+                    lfoForcedActiveByNote = false;
+
+                    // Request UI to set the parameter OFF so button syncs visually
+                    uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
                 }
             }
         }
@@ -391,44 +421,6 @@ public:
 
         // Advance global time after processing the block
         timeMs = blockStartMs + blockDurationMs;
-
-        bool anyRouteEnabled = false;
-        bool anyRouteStillProducing = false;
-
-        for (int i = 0; i < maxRoutes; ++i)
-        {// Advance global time after processing the block
-        timeMs = blockStartMs + blockDurationMs;
-
-        bool anyRouteEnabled = false;
-        bool anyRouteStillProducing = false;
-
-        for (int i = 0; i < maxRoutes; ++i)
-        {
-            const auto& r = lfoRoutes[i];
-            if (r.midiChannel <= 0 || r.parameterIndex < 0)
-                continue;
-
-            anyRouteEnabled = true;
-
-            if (!r.oneShot || !r.hasFinishedOneShot)
-                anyRouteStillProducing = true;
-        }
-
-        const bool runningNow = (lfoActive && !lfoRuntimeMuted && anyRouteEnabled && anyRouteStillProducing);
-        uiLfoIsRunning.store(runningNow, std::memory_order_release);
-            const auto& r = lfoRoutes[i];
-            if (r.midiChannel <= 0 || r.parameterIndex < 0)
-                continue;
-
-            anyRouteEnabled = true;
-
-            if (!r.oneShot || !r.hasFinishedOneShot)
-                anyRouteStillProducing = true;
-        }
-
-        const bool runningNow = (lfoActive && !lfoRuntimeMuted && anyRouteEnabled && anyRouteStillProducing);
-        uiLfoIsRunning.store(runningNow, std::memory_order_release);
-
     }
 
     //==============================================================================
@@ -469,7 +461,6 @@ public:
 
     //==============================================================================
     inline APVTS&       getAPVTS()       noexcept { return apvts; }
-    inline const APVTS& getAPVTS() const noexcept { return apvts; }
 
     inline double getSampleRateCached() const noexcept { return cachedSampleRate; }
     inline int    getBlockSizeCached()  const noexcept { return cachedBlockSize; }
@@ -481,6 +472,7 @@ public:
     }
 
     std::atomic<bool> uiRequestSetLfoActiveOn { false };
+    std::atomic<bool> uiRequestSetLfoActiveOff { false };
 
 private:
 
@@ -513,9 +505,9 @@ private:
         // Sync mode: 0=Free, 1=MIDI Clock
         p.push_back (std::make_unique<juce::AudioParameterChoice>(
             "syncMode", "Sync Mode",
-            juce::StringArray{ "Free", "MIDI Clock" }, 0));  // syncDivision
+            juce::StringArray{ "Free", "MIDI Clock" }, 0));  
 
-        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+        p.push_back (std::make_unique<juce::AudioParameterChoice>( // syncDivision
             "syncDivision", "Sync Division",
             juce::StringArray{ "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8 dotted", "1/16 dotted" }, 0));
 
@@ -582,9 +574,7 @@ private:
     return { p.begin(), p.end() };
     }
 
-
     //==============================================================================
-    /** Migration state copied from MainComponent (temporary). */
 
     // Pending note flags (replaces GlobalMidiCallback storage)
     PendingMidiFlags pending;
@@ -631,10 +621,8 @@ private:
 
     inline void handleMidiContinue() override {}
 
-
-
     //==============================================================================
-    // Helpers copied from MainComponent (minimal set)
+    // Helpers
 
     inline void applyPendingTransportEvents (LfoShape shape)
     {
@@ -644,7 +632,7 @@ private:
         if (!gotStart && !gotStop)
             return;
 
-        // Your old MainComponent logic was resetting phases + one-shot runtime flags.
+        // Resetting phases + one-shot runtime flags.
         for (int i = 0; i < maxRoutes; ++i)
         {
             auto& route = lfoRoutes[i];
@@ -653,14 +641,23 @@ private:
 
             route.hasFinishedOneShot = false;
             route.passedPeak = false;
+            route.totalPhaseAdvanced = 0.0;
         }
 
         requestLfoRestart.store(true, std::memory_order_release);
 
         if (gotStop)
         {
-            // Optional: stop LFO on transport stop
-            // lfoRuntimeMuted = true;
+            // Stop LFO on transport stop
+            for (int i = 0; i < maxRoutes; ++i)
+            {
+                auto& route = lfoRoutes[i];
+
+                route.hasFinishedOneShot = false;
+                route.passedPeak = false;
+                route.totalPhaseAdvanced = 0.0;
+            }
+            lfoRuntimeMuted = true;
         }
     }
 
@@ -724,7 +721,7 @@ public:
     APVTS apvts;
 
 private:
-    double cachedSampleRate = 44100.0;
+    double cachedSampleRate = 48000.0;
     int    cachedBlockSize  = 0;
 
     // Helpers for per-sample scheduling (updated each processBlock)timeMs
