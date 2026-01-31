@@ -177,6 +177,9 @@ public:
             r.oneShot = oneShot;
         }
 
+        // scope view
+        bool scopeOn = apvts.getRawParameterValue("scope")->load() > 0.5f;
+
         // 0) Parse incoming MIDI -> set pending flags (same semantics as GlobalMidiCallback)
         parseIncomingMidiBuffer (midiIn,
                                  pending,
@@ -346,9 +349,11 @@ public:
                     // Replace device send with MidiBuffer addEvent
                     sendThrottledParamValueToBuffer (midi, i, route.midiChannel, param, midiVal, offset);
 
-                    // Scope tap
-                    // (If you keep lfoRoutesToScope[], preserve it similarly in processor)
-                    // lastLfoRoutesValues[i].store((float)(shape * depth), std::memory_order_relaxed);
+                    // Scope tap (only if scope overlay enabled a route)
+                    if (scopeRoutesEnabled[i].load(std::memory_order_relaxed))
+                    {
+                        scopeValues[i].store((float)(shapeComputed * depth), std::memory_order_relaxed);
+                    }
                 }
             }
 
@@ -474,6 +479,10 @@ public:
     std::atomic<bool> uiRequestSetLfoActiveOn { false };
     std::atomic<bool> uiRequestSetLfoActiveOff { false };
 
+    // Scope accessors for UI (safe: atomics)
+    inline auto& getScopeValues() noexcept { return scopeValues; }
+    inline auto& getScopeRoutesEnabled() noexcept { return scopeRoutesEnabled; }
+
 private:
 
     // MIDI clock/transport
@@ -515,6 +524,9 @@ private:
         p.push_back (std::make_unique<juce::AudioParameterBool>("noteRestart", "Note Restart", false));
         p.push_back (std::make_unique<juce::AudioParameterInt>("noteSourceChannel", "Note Restart Channel", 0, 16, 0));
         p.push_back (std::make_unique<juce::AudioParameterBool>("noteOffStop", "Stop on Note Off", false));
+
+        // Scope view
+        p.push_back (std::make_unique<juce::AudioParameterBool>("scope", "Scope View", false));
 
         //LFO routes
         // Build the syntakt parameter name list for combo boxes
@@ -608,6 +620,18 @@ private:
     double msFloofThreshold = 10.0;
     double timeMs = 0.0;
 
+    //==================== Scope (shared audio->UI) ====================
+    std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
+    std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
+
+    // quick helper (optional)
+    inline bool isAnyScopeRouteEnabled() const noexcept
+    {
+        for (const auto& r : scopeRoutesEnabled)
+            if (r.load(std::memory_order_relaxed))
+                return true;
+        return false;
+    }
 
     inline void handleMidiStart() override
     {

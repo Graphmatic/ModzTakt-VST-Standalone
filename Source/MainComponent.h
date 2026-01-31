@@ -359,6 +359,8 @@ public:
         };
 
         addAndMakeVisible(scopeButton);
+        //apvts
+        scopeButtonAttach = std::make_unique<ButtonAttachment>(apvts, "scope", scopeButton);
 
         // Settings Button
         addAndMakeVisible(settingsButton);
@@ -730,11 +732,13 @@ public:
             return;
         }
 
-        lfoRoutesToScope[0] = true; // first route active by default
+        auto& scopeValues = processor.getScopeValues();
+        auto& scopeRoutes = processor.getScopeRoutesEnabled();
 
-        scopeOverlay.reset(new ScopeModalComponent<maxRoutes>(
-            lastLfoRoutesValues,
-            lfoRoutesToScope));
+        scopeRoutes[0].store(true, std::memory_order_relaxed); // route 1 active by default
+
+        scopeOverlay.reset(new ScopeModalComponent<maxRoutes>(scopeValues, scopeRoutes));
+
 
         scopeOverlay->onAllRoutesDisabled = [this]()
         {
@@ -766,7 +770,11 @@ public:
         if (!scopeOverlay)
             return;
 
-        lfoRoutesToScope.fill(false);
+        auto& scopeRoutes = processor.getScopeRoutesEnabled();
+
+        for (auto& r : scopeRoutes)
+            r.store(false, std::memory_order_relaxed);
+
         removeChildComponent(scopeOverlay.get());
         scopeOverlay.reset();
     }
@@ -777,28 +785,22 @@ private:
     ModzTaktAudioProcessor& processor;
     ModzTaktAudioProcessor::APVTS& apvts;
 
-    //juce::AudioProcessorValueTreeState& apvts;
-
-    std::atomic<bool> pendingSyncModeChange { false };
-
-    
-
     juce::GroupComponent lfoGroup;
 
     juce::Label syncModeLabel;
     juce::Label bpmLabelTitle, bpmLabel, divisionLabel;
     juce::Label parameterLabel, shapeLabel, rateLabel, depthLabel, channelLabel, bipolarLabel, invertPhaseLabel, oneShotLabel;
 
-    juce::ComboBox syncModeBox, divisionBox; //////divbox
-    juce::ComboBox shapeBox; ////////////
+    juce::ComboBox syncModeBox, divisionBox;
+    juce::ComboBox shapeBox;
 
     // SLiders
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };
     ModzTaktLookAndFeel lookPurple { SetupUI::sliderTrackPurple };
-    juce::Slider rateSlider, depthSlider; //////////
+    juce::Slider rateSlider, depthSlider;
 
     //Note-On retrig on/off and source channel
-    std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle; ////////////
+    std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle;
     juce::Label noteRestartToggleLabel, noteOffStopToggleLabel;
 
     juce::ComboBox noteSourceChannelBox; // source channel for Note-On listening (lfo)
@@ -836,6 +838,13 @@ private:
     // Setting Pop-Up
     juce::TextButton settingsButton;
 
+    // Oscilloscope
+    juce::Image scopeIcon;
+    juce::ImageButton scopeButton;
+    std::unique_ptr<ScopeModalComponent<maxRoutes>> scopeOverlay;
+
+    std::atomic<bool> pendingSyncModeChange { false };
+
     //*******************************  APVTS ****************************************//
     //*******************************************************************************//
     using SliderAttachment  = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -858,19 +867,14 @@ private:
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeInvertAttach;
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeOneShotAttach;
 
+    //Scope
+    std::unique_ptr<ButtonAttachment> scopeButtonAttach;
+
     bool lastWasRandomShape = false;
 
     // BPM smoothing / throttling
     double displayedBpm = 0.0;
     juce::int64 lastBpmUpdateMs = 0;
-
-    // Oscilloscope
-    juce::Image scopeIcon;
-    juce::ImageButton scopeButton;
-    std::unique_ptr<ScopeModalComponent<maxRoutes>> scopeOverlay;
-
-    std::array<std::atomic<float>, maxRoutes> lastLfoRoutesValues { 0.0f, 0.0f, 0.0f };
-    std::array<bool, maxRoutes> lfoRoutesToScope { false, false, false };
 
     // EG
     std::unique_ptr<EnvelopeComponent> envelopeComponent;

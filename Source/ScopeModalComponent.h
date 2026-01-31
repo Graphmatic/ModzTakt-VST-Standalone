@@ -9,7 +9,7 @@ class ScopeModalComponent : public juce::Component,
 public:
 
     using LFOValuesArray = std::array<std::atomic<float>, N>;
-    using RoutesEnabledArray = std::array<bool, N>;
+    using RoutesEnabledArray = std::array<std::atomic<bool>, N>;
 
     ScopeModalComponent(LFOValuesArray& lfoValuesRefs, RoutesEnabledArray& lfoRoutesEnabled)
         : lfoValues(lfoValuesRefs), lfoRoutesEnabled(lfoRoutesEnabled)
@@ -79,7 +79,6 @@ public:
         }
     }
 
-
     void visibilityChanged() override
     {
         if (isVisible() && anyRouteEnabled())
@@ -93,7 +92,7 @@ public:
 
         for (size_t i = 0; i < lfoValues.size(); ++i)
         {
-            if (!lfoRoutesEnabled[i])
+            if (!lfoRoutesEnabled[i].load(std::memory_order_relaxed))
                 continue;
 
             auto r = getLocalBounds().toFloat();
@@ -158,13 +157,12 @@ private:
 
         for (size_t i = 0; i < lfoValues.size(); ++i)
         {
-            if (lfoRoutesEnabled[i])
+            if (lfoRoutesEnabled[i].load(std::memory_order_relaxed))
                 pushSample(lfoValues[i].load(std::memory_order_relaxed), i);
         }
 
         repaint();
     }
-
 
     // Push a new LFO sample (-1..+1 expected)
     void pushSample(float v, size_t lfoIndex)
