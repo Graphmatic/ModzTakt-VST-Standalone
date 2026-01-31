@@ -82,7 +82,7 @@ public:
     void visibilityChanged() override
     {
         if (isVisible() && anyRouteEnabled())
-            startTimerHz(60);
+            startTimerHz(120);
         else
             stopTimer();
     }

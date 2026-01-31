@@ -51,7 +51,7 @@ public:
     //==============================================================================
     inline void prepareToPlay (double sampleRate, int samplesPerBlock) override
     {
-        cachedSampleRate = (sampleRate > 0.0 ? sampleRate : 44100.0);
+        cachedSampleRate = (sampleRate > 0.0 ? sampleRate : 48000.0);
         cachedBlockSize  = samplesPerBlock;
 
         const bool isStandaloneWrapper =
@@ -94,8 +94,7 @@ public:
 
         const double blockStartMs = timeMs;
 
-        const double blockDurationMs = 1000.0 * (double) audio.getNumSamples()
-                / juce::jmax (1.0, getSampleRate());
+        const double blockDurationMs = 1000.0 * (double) audio.getNumSamples() / juce::jmax (1.0, getSampleRate());
 
         currentBlockStartMs = blockStartMs;
         msPerSample = 1000.0 / juce::jmax (1.0, getSampleRate());
@@ -110,6 +109,9 @@ public:
 
         modztakt::lfo::syncRoutesFromApvts<maxRoutes> (apvts, shape, lfoRoutes, lastRouteSnapshot, lfoPhase);
 
+        const int syncModeId = ((int) apvts.getRawParameterValue("syncMode")->load()) + 1;
+        const bool syncEnabled = (syncModeId == 2);
+
         // Detect user toggling OFF (explicit stop) and clear forced-run
         if (lastLfoActiveParam && !lfoActiveParam)
         {
@@ -118,21 +120,8 @@ public:
         }
         lastLfoActiveParam = lfoActiveParam;
 
-        // Apply LFO Active state (resets phases)
-        const bool shouldRunLfo = (lfoActiveParam || lfoForcedActiveByNote);
-
-        modztakt::lfo::applyLfoActiveState (shouldRunLfo,
-                                   shape,
-                                   lfoActive,
-                                   lfoRuntimeMuted,
-                                   lfoRoutes,
-                                   lfoPhase);
-
         const double rateSliderValueHz = apvts.getRawParameterValue("lfoRateHz")->load();
         const double depthSliderValue  = apvts.getRawParameterValue("lfoDepth")->load();
-
-        const int syncModeId = ((int) apvts.getRawParameterValue("syncMode")->load()) + 1;
-        const bool syncEnabled = (syncModeId == 2);
 
         const bool noteRestartToggleState = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
         if (!noteRestartToggleState)
@@ -140,7 +129,7 @@ public:
 
         const bool noteOffStopToggleState = apvts.getRawParameterValue("noteOffStop")->load() > 0.5f;
         const int noteSourceChannel = (int) apvts.getRawParameterValue("noteSourceChannel")->load();
-        const int syncDivisionId = (int) apvts.getRawParameterValue("syncDivision")->load();
+        const int syncDivisionId = (int) apvts.getRawParameterValue("syncDivision")->load() + 1;
         // -------------------------------------------------------------------------
 
         // LFO Routes
@@ -188,7 +177,35 @@ public:
                                  noteRestartToggleState,
                                  noteOffStopToggleState);
 
-        applyPendingTransportEvents(shape);
+        applyPendingTransportEvents(shape, syncEnabled);
+
+        const double bpm = updateTempoFromHostOrMidiClock(syncEnabled);
+
+        double rateHz = rateSliderValueHz;
+        // const double bpm = bpmForUi.load(std::memory_order_relaxed);
+
+        if (syncEnabled && bpm > 0.0)
+        {
+                rateHz = modztakt::lfo::updateLfoRateFromBpm (rateHz, bpm, syncDivisionId);
+                // only request UI update if it actually changed enough
+                const float current = apvts.getRawParameterValue("lfoRateHz")->load();
+                if (std::abs((float)rateHz - current) > 0.0005f)
+                {
+                    uiRateHzToSet.store((float)rateHz, std::memory_order_relaxed);
+                    uiRequestSetRateHz.store(true, std::memory_order_release);
+                }
+        }
+
+        // Apply LFO Active state (resets phases)
+        const bool transportOk = (!syncEnabled) || transportRunning.load(std::memory_order_acquire);
+        const bool shouldRunLfo = (lfoActiveParam && transportOk) || lfoForcedActiveByNote;
+
+        modztakt::lfo::applyLfoActiveState (shouldRunLfo,
+                                   shape,
+                                   lfoActive,
+                                   lfoRuntimeMuted,
+                                   lfoRoutes,
+                                   lfoPhase);
 
         // 1) NOTE ON
         if (pending.pendingNoteOn.exchange(false, std::memory_order_acq_rel))
@@ -204,15 +221,14 @@ public:
             // --- LFO Note Restart ---
             if (noteRestartToggleState)
             {
-                const bool matchesSource =
-                    (noteSourceChannel <= 0) ? true : (ch == noteSourceChannel);
+                const bool matchesSource = (noteSourceChannel <= 0) ? true : (ch == noteSourceChannel);
 
                 if (matchesSource)
                 {
                     if (!lfoActiveParam)
                         uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
 
-                    lfoForcedActiveByNote = true;  // <--- NEW
+                    lfoForcedActiveByNote = true;
                     requestLfoRestart.store (true, std::memory_order_release);
                     for (int i = 0; i < maxRoutes; ++i)
                     {
@@ -246,9 +262,6 @@ public:
             }
         }
 
-        // 4) LFO core variables (same as timerCallback)
-        const double bpm = midiClock.getCurrentBPM();
-
         // Handle pending retrigger from Note-On
         if (requestLfoRestart.exchange(false, std::memory_order_acq_rel))
         {
@@ -272,10 +285,10 @@ public:
         // LFO generation + send (writes into `midi`)
         if (lfoActive && !lfoRuntimeMuted)
         {
-            double rateHz = rateSliderValueHz;
+            //double rateHz = rateSliderValueHz;
 
-            if (syncEnabled && bpm > 0.0)
-                rateHz = modztakt::lfo::updateLfoRateFromBpm (rateHz, bpm, syncDivisionId, syncEnabled); // must be processor/engine method now
+            // if (syncEnabled && bpm > 0.0)
+            //     rateHz = modztakt::lfo::updateLfoRateFromBpm (rateHz, bpm, syncDivisionId, syncEnabled); // must be processor/engine method now
 
             // IMPORTANT: timerCallback used phaseInc = rateHz / sampleRate;
             // sampleRate in plugin is per-sample. We have numSamples in this block:
@@ -483,11 +496,21 @@ public:
     inline auto& getScopeValues() noexcept { return scopeValues; }
     inline auto& getScopeRoutesEnabled() noexcept { return scopeRoutesEnabled; }
 
+    double getBpmForUi() const noexcept { return bpmForUi.load(std::memory_order_relaxed); }
+
+    std::atomic<bool>  uiRequestSetRateHz { false };
+    std::atomic<float> uiRateHzToSet { 0.0f };
+
 private:
 
     // MIDI clock/transport
     std::atomic<bool> transportStartPending { false };
     std::atomic<bool> transportStopPending  { false };
+
+    std::atomic<double> bpmForUi { 0.0 };
+    std::atomic<bool>   hostTransportRunning { false };
+
+
 
     //==============================================================================
     inline static APVTS::ParameterLayout createParameterLayout()
@@ -624,7 +647,8 @@ private:
     std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
     std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
 
-    // quick helper (optional)
+    // Helpers
+
     inline bool isAnyScopeRouteEnabled() const noexcept
     {
         for (const auto& r : scopeRoutesEnabled)
@@ -645,16 +669,69 @@ private:
 
     inline void handleMidiContinue() override {}
 
-    //==============================================================================
-    // Helpers
-
-    inline void applyPendingTransportEvents (LfoShape shape)
+    inline const double updateTempoFromHostOrMidiClock (bool syncEnabled)
     {
+        double bpm = 0.0;
+
+        if (!syncEnabled)
+        {
+            bpmForUi.store(0.0, std::memory_order_relaxed);
+            hostTransportRunning.store(true, std::memory_order_relaxed);
+            return bpm;
+        }
+
+        bool playing = true;
+
+        if (auto* playHead = getPlayHead())
+        {
+            auto pos = playHead->getPosition();
+            if (pos.hasValue())
+            {
+                // BPM (Optional<double>)
+                if (auto hostBpm = pos->getBpm(); hostBpm.hasValue())
+                {
+                    const double v = *hostBpm;
+                    if (std::isfinite(v) && v > 0.0)
+                        bpm = v;
+                }
+
+                // isPlaying (bool)
+                playing = pos->getIsPlaying();
+            }
+        }
+
+        // Fallback to MIDI clock if host doesn't provide BPM
+        if (bpm <= 0.0)
+            bpm = midiClock.getCurrentBPM();
+
+        bpmForUi.store(bpm, std::memory_order_relaxed);
+        hostTransportRunning.store(playing, std::memory_order_relaxed);
+
+        return bpm;
+    }
+
+
+
+    inline void applyPendingTransportEvents (LfoShape shape, bool syncEnabled)
+    {
+        // If sync is off, we don't use transport gating.
+        if (!syncEnabled)
+        {
+            transportRunning.store(true, std::memory_order_release);
+            return;
+        }
+
         const bool gotStart = transportStartPending.exchange(false, std::memory_order_acq_rel);
         const bool gotStop  = transportStopPending.exchange(false,  std::memory_order_acq_rel);
 
         if (!gotStart && !gotStop)
             return;
+
+        if (gotStart)
+            transportRunning.store(true, std::memory_order_release);
+
+        if (gotStop)
+            transportRunning.store(false, std::memory_order_release);
 
         // Resetting phases + one-shot runtime flags.
         for (int i = 0; i < maxRoutes; ++i)
@@ -673,15 +750,15 @@ private:
         if (gotStop)
         {
             // Stop LFO on transport stop
-            for (int i = 0; i < maxRoutes; ++i)
-            {
-                auto& route = lfoRoutes[i];
-
-                route.hasFinishedOneShot = false;
-                route.passedPeak = false;
-                route.totalPhaseAdvanced = 0.0;
-            }
             lfoRuntimeMuted = true;
+            lfoForcedActiveByNote = false;
+            uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+        }
+        else if (gotStart)
+        {
+            // Start should unmute so the LFO can run
+            lfoRuntimeMuted = false;
+            uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
         }
     }
 
@@ -760,6 +837,7 @@ private:
 
     std::atomic<bool> uiLfoIsRunning { false };
 
+    std::atomic<bool> transportRunning { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModzTaktAudioProcessor)
 };

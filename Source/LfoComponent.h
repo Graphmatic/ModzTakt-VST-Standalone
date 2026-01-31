@@ -192,9 +192,9 @@ namespace modztakt::lfo
         return beatsPerSecond * multiplier;
     }
 
-    inline double updateLfoRateFromBpm (double rateHz, double bpm, int syncDivisionId, bool syncEnabled)
+    inline double updateLfoRateFromBpm (double rateHz, double bpm, int syncDivisionId)
     {
-        if (syncEnabled && bpm > 0.0)
+        if (bpm > 0.0)
             rateHz = bpmToHz(bpm, syncDivisionId);
 
         return rateHz;

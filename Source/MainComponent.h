@@ -48,7 +48,7 @@ public:
         syncModeBox.setSelectedId(1); // Free mode by default      
 
         // BPM Display
-        bpmLabelTitle.setText("Detected BPM:", juce::dontSendNotification);
+        bpmLabelTitle.setText("BPM:", juce::dontSendNotification);
         addAndMakeVisible(bpmLabelTitle);
         bpmLabel.setText("--", juce::dontSendNotification);
         bpmLabel.setColour(juce::Label::textColourId, juce::Colours::aqua);
@@ -66,7 +66,6 @@ public:
         divisionBox.addItem("1/32", 6);
         divisionBox.addItem("1/8 dotted", 7);
         divisionBox.addItem("1/16 dotted", 8);
-        //divisionBox.onChange = [this]() { updateLfoRateFromBpm(rateSlider.getValue()); };
         addAndMakeVisible(divisionBox);
         // apvts
         syncDivisionAttach = std::make_unique<ChoiceAttachment>(apvts, "syncDivision", divisionBox);
@@ -141,7 +140,6 @@ public:
 
         addAndMakeVisible(noteSourceChannelBox);
         
-        // noteSourceChannelBox.setTextWhenNothingSelected("Source Channel");
         for (int ch = 1; ch <= 16; ++ch)
                 noteSourceChannelBox.addItem("Ch " + juce::String(ch), ch);
 
@@ -290,9 +288,6 @@ public:
                 // Only show oneshot if route enabled AND noteRestart is enabled
                 const bool noteRestartOn = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
                 routeOneShotToggles[i]->setVisible(enabled && noteRestartOn);
-
-                // // Initialize note source channel list
-                // updateNoteSourceChannel();
         
                 // Layout update
                 juce::MessageManager::callAsync([this]() { resized(); });
@@ -420,9 +415,7 @@ public:
                 });
         };
 
-        //MIDI MONITOR
         #if JUCE_DEBUG
-
         //EG check in ScopeRoute[0]
         addAndMakeVisible(showEGinScopeToggle);
         showEGinScopeToggle.setToggleState(showEGinScope, juce::dontSendNotification);
@@ -434,7 +427,7 @@ public:
         #endif
 
         // Timer
-        startTimerHz(30); // 100Hz refresh  
+        startTimerHz(30); // UI refresh, don't need to be faster
     }
 
     ~MainComponent() override
@@ -752,7 +745,7 @@ public:
 
         // Position relative to LFO area
         auto lfoBounds = getLocalBounds()
-                            .withHeight(800).reduced(12)
+                            .withHeight(700).reduced(12)
                             .removeFromLeft(450);  //LFO area width
 
         scopeOverlay->setBounds(
@@ -785,6 +778,8 @@ private:
     ModzTaktAudioProcessor& processor;
     ModzTaktAudioProcessor::APVTS& apvts;
 
+    static constexpr int maxRoutes = 3;
+
     juce::GroupComponent lfoGroup;
 
     juce::Label syncModeLabel;
@@ -807,21 +802,6 @@ private:
 
     juce::TextButton startButton;
 
-    bool syncEnabled = false; // for BPM display
-
-    // Multi-CC Routing
-    static constexpr int maxRoutes = 3;
-    struct LfoRoute { 
-        int midiChannel = 0;
-        int parameterIndex = 0;
-        bool bipolar = false;
-        bool invertPhase = false;
-        bool oneShot = false;
-        bool passedPeak = false; // used when unipolar + oneshot
-        bool hasFinishedOneShot = false; // runtime state
-    };
-
-    std::array<LfoRoute, maxRoutes> lfoRoutes;
     std::array<juce::Label, maxRoutes> routeLabels;
     std::array<juce::ComboBox, maxRoutes> routeChannelBoxes;
     std::array<juce::ComboBox, maxRoutes> routeParameterBoxes;
@@ -923,12 +903,20 @@ private:
             }
         }
 
-
         const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
         startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
 
-        const double rateValue = processor.getAPVTS().getRawParameterValue("lfoRateHz")->load();
-        rateSlider.setValue(rateValue, juce::dontSendNotification);
+        if (processor.uiRequestSetRateHz.exchange(false, std::memory_order_acq_rel))
+        {
+            const float hz = processor.uiRateHzToSet.load(std::memory_order_relaxed);
+
+            if (auto* p = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("lfoRateHz")))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost(p->convertTo0to1(hz));
+                p->endChangeGesture();
+            }
+        }
 
         const int shapeId = shapeBox.getSelectedId();
         const bool isRandom = (shapeId == 5);
@@ -963,39 +951,39 @@ private:
             }
         }
 
-        // Display bpm TODO
-        // const bool syncEnabled = (syncModeBox.getSelectedId() == 2);
-        // const double bpm = midiClock.getCurrentBPM();
+        // Display bpm
+        const int syncModeIndex = (int) processor.getAPVTS().getRawParameterValue("syncMode")->load(); // 0 or 1
+        const bool syncEnabled = (syncModeIndex == 1);
 
         // Always update BPM display if sync mode is active
-        // if (syncEnabled)
-        // {
-        //     const double bpm = midiClock.getCurrentBPM();
-        //     const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+        if (syncEnabled)
+        {
+            const double bpm = processor.getBpmForUi();
+            const auto nowMs = juce::Time::getMillisecondCounterHiRes();
 
-        //     if (bpm > 0.0)
-        //     {
-        //         // Smooth & rate-limit UI updates
-        //         displayedBpm = 0.9 * displayedBpm + 0.1 * bpm;
-        //         if (nowMs - lastBpmUpdateMs > 250.0)
-        //         {
-        //             bpmLabel.setText(juce::String(displayedBpm, 1), juce::dontSendNotification);
-        //             lastBpmUpdateMs = nowMs;
-        //         }
-        //     }
-        //     else
-        //     {
-        //         // No clock yet: show placeholder
-        //         if (nowMs - lastBpmUpdateMs > 500.0)
-        //         {
-        //             bpmLabel.setText("--", juce::dontSendNotification);
-        //             lastBpmUpdateMs = nowMs;
-        //         }
-        //     }
-        // }
-        // else
-        // {
-        //     // When not in sync mode, just freeze BPM display
-        // }
+            if (bpm > 0.0)
+            {
+                // Smooth & rate-limit UI updates
+                displayedBpm = 0.9 * displayedBpm + 0.1 * bpm;
+                if (nowMs - lastBpmUpdateMs > 250.0)
+                {
+                    bpmLabel.setText(juce::String(displayedBpm, 1), juce::dontSendNotification);
+                    lastBpmUpdateMs = nowMs;
+                }
+            }
+            else
+            {
+                // No clock yet: show placeholder
+                if (nowMs - lastBpmUpdateMs > 500.0)
+                {
+                    bpmLabel.setText("--", juce::dontSendNotification);
+                    lastBpmUpdateMs = nowMs;
+                }
+            }
+        }
+        else
+        {
+            bpmLabel.setText("--", juce::dontSendNotification);
+        }
     }
 };
