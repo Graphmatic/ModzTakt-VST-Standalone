@@ -54,9 +54,6 @@ public:
         cachedSampleRate = (sampleRate > 0.0 ? sampleRate : 48000.0);
         cachedBlockSize  = samplesPerBlock;
 
-        isStandaloneWrapper = (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
-
-        useHostClock = !isStandaloneWrapper; // plugin = host clock, standalone = device clock
         // If audio added:
         // engine.prepare(cachedSampleRate, cachedBlockSize);
     }
@@ -571,8 +568,6 @@ private:
     // MIDI clock (same class as you used in MainComponent)
     MidiClockHandler midiClock;
 
-    bool useHostClock = true; // plugin hosted: true, standalone with separate clock device: false
-
     // LFO state
     static constexpr int maxRoutes = 3; // IMPORTANT: your MainComponent uses 3
 
@@ -600,8 +595,6 @@ private:
     //==================== Scope (shared audio->UI) ====================
     std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
     std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
-
-    bool isStandaloneWrapper = false;
 
     //==============================================================================
     inline static APVTS::ParameterLayout createParameterLayout()
