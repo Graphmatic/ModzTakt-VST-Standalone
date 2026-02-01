@@ -38,7 +38,7 @@ public:
         }
         else
         {
-            syncModeBox.addItem("Host Clock", 2);
+            syncModeBox.addItem("HOST Clock", 2);
         }
         // apvts
         syncModeAttach = std::make_unique<ChoiceAttachment>(apvts, "syncMode", syncModeBox);
@@ -53,6 +53,21 @@ public:
         bpmLabel.setText("--", juce::dontSendNotification);
         bpmLabel.setColour(juce::Label::textColourId, juce::Colours::aqua);
         addAndMakeVisible(bpmLabel);
+
+        // Start on PLay
+        startOnPlayToggleLabel.setText ("Start on Play", juce::dontSendNotification);
+        startOnPlayToggleLabel.setJustificationType (juce::Justification::centredLeft);
+        startOnPlayToggleLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible(startOnPlayToggleLabel);
+
+        startOnPLayToggle = std::make_unique<LedToggleButton>
+        (
+            "Start on Play",
+            SetupUI::LedColour::Red
+        );
+        addAndMakeVisible (*startOnPLayToggle);
+        // apvts
+        startOnPlayAttach = std::make_unique<ButtonAttachment>(apvts, "playStart", *startOnPLayToggle);
 
         // Sync Division
         divisionLabel.setText("Tempo Divider:", juce::dontSendNotification);
@@ -476,16 +491,45 @@ public:
             label.setBounds(row.removeFromLeft(labelWidth));
             row.removeFromLeft(spacing);
             comp.setBounds(row);
-            lfoAreaContent.removeFromTop(6);
+            lfoAreaContent.removeFromTop(10);
         };
 
         placeRow(syncModeLabel, syncModeBox);
 
+        ////////////////////////////////////
+        auto syncModeRow = lfoAreaContent.removeFromTop(rowHeight + 4);
+
+        juce::FlexBox syncModeOptions;
+        syncModeOptions.flexDirection = juce::FlexBox::Direction::row;
+        syncModeOptions.alignItems    = juce::FlexBox::AlignItems::flexStart;
+        syncModeOptions.justifyContent= juce::FlexBox::JustifyContent::flexStart;
+
+        syncModeOptions.items.add(juce::FlexItem(bpmLabelTitle)
+                                                .withWidth(60)
+                                                .withHeight(rowHeight)
+                                                .withMargin({ 0, 4, 0, 0 }));
+        syncModeOptions.items.add(juce::FlexItem(bpmLabel)
+                                                .withWidth(80)
+                                                .withHeight(rowHeight)
+                                                .withMargin({ 0, 8, 0, 0 }));
+        syncModeOptions.items.add(juce::FlexItem(*startOnPLayToggle)
+                                                .withWidth(22)
+                                                .withHeight(24)
+                                                .withMargin({ 0, 6, 0, 0 }));
+        syncModeOptions.items.add(juce::FlexItem(startOnPlayToggleLabel)
+                                                .withWidth(100)
+                                                .withHeight(24)
+                                                .withMargin({ 0, 8, 0, 0 }));
+
+        syncModeOptions.performLayout(syncModeRow);
+        /////////////////////////
+
         // BPM label pair
-        auto bpmRow = lfoAreaContent.removeFromTop(rowHeight);
-        bpmLabelTitle.setBounds(bpmRow.removeFromLeft(labelWidth));
-        bpmRow.removeFromLeft(spacing);
-        bpmLabel.setBounds(bpmRow);
+        // auto bpmRow = lfoAreaContent.removeFromTop(rowHeight);
+        // bpmLabelTitle.setBounds(bpmRow.removeFromLeft(labelWidth));
+        // bpmRow.removeFromLeft(spacing);
+        // bpmLabel.setBounds(bpmRow);
+
         lfoAreaContent.removeFromTop(6);
 
         placeRow(divisionLabel, divisionBox);
@@ -772,7 +816,6 @@ public:
         scopeOverlay.reset();
     }
 
-
 private:
     // UI Components
     ModzTaktAudioProcessor& processor;
@@ -782,7 +825,7 @@ private:
 
     juce::GroupComponent lfoGroup;
 
-    juce::Label syncModeLabel;
+    juce::Label syncModeLabel, startOnPlayToggleLabel;
     juce::Label bpmLabelTitle, bpmLabel, divisionLabel;
     juce::Label parameterLabel, shapeLabel, rateLabel, depthLabel, channelLabel, bipolarLabel, invertPhaseLabel, oneShotLabel;
 
@@ -794,11 +837,11 @@ private:
     ModzTaktLookAndFeel lookPurple { SetupUI::sliderTrackPurple };
     juce::Slider rateSlider, depthSlider;
 
-    //Note-On retrig on/off and source channel
-    std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle;
+    //Note-On retrig on/off and source channel and start on PLay (in synced mode)
+    std::unique_ptr<LedToggleButton> noteRestartToggle, noteOffStopToggle, startOnPLayToggle;
     juce::Label noteRestartToggleLabel, noteOffStopToggleLabel;
 
-    juce::ComboBox noteSourceChannelBox; // source channel for Note-On listening (lfo)
+    juce::ComboBox noteSourceChannelBox; // source channel for Note-On listening (lfo)startOnPLayToggle
 
     juce::TextButton startButton;
 
@@ -831,6 +874,7 @@ private:
     using ButtonAttachment  = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ChoiceAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    std::unique_ptr<ButtonAttachment> startOnPlayAttach;
     std::unique_ptr<ButtonAttachment> lfoActiveAttach;
     std::unique_ptr<SliderAttachment> rateAttach, depthAttach;
     std::unique_ptr<ChoiceAttachment> shapeAttach;

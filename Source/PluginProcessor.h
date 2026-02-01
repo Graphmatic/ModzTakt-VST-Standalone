@@ -54,10 +54,9 @@ public:
         cachedSampleRate = (sampleRate > 0.0 ? sampleRate : 48000.0);
         cachedBlockSize  = samplesPerBlock;
 
-        const bool isStandaloneWrapper =
-                (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
+        isStandaloneWrapper = (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::WrapperType::wrapperType_Standalone);
 
-    useHostClock = !isStandaloneWrapper; // plugin = host clock, standalone = device clock
+        useHostClock = !isStandaloneWrapper; // plugin = host clock, standalone = device clock
         // If audio added:
         // engine.prepare(cachedSampleRate, cachedBlockSize);
     }
@@ -112,10 +111,16 @@ public:
         const int syncModeId = ((int) apvts.getRawParameterValue("syncMode")->load()) + 1;
         const bool syncEnabled = (syncModeId == 2);
 
+        const bool startOnPlayToggleState = apvts.getRawParameterValue("playStart")->load() > 0.5f;
+        startOnPlay.store(startOnPlayToggleState, std::memory_order_release);
+        if (!startOnPlayToggleState)
+            lfoForcedActiveByPlay = false;
+
         // Detect user toggling OFF (explicit stop) and clear forced-run
         if (lastLfoActiveParam && !lfoActiveParam)
         {
             lfoForcedActiveByNote = false;
+            lfoForcedActiveByPlay = false;
             lfoRuntimeMuted = false;
         }
         lastLfoActiveParam = lfoActiveParam;
@@ -181,8 +186,51 @@ public:
 
         const double bpm = updateTempoFromHostOrMidiClock(syncEnabled);
 
+        // --- Host transport -> pending transport events (plugin case) ---
+        // if DAWs do NOT send MIDI Start/Stop to plugins; use playhead instead.
+        if (syncEnabled && hostTransportValid.load(std::memory_order_relaxed))
+        {
+            const bool hostPlaying = hostTransportRunning.load(std::memory_order_relaxed);
+
+            if (hostPlaying && !lastHostPlaying)
+            {
+                transportStartPending.store(true, std::memory_order_release);
+
+                // Make gating effective immediately for this block
+                transportRunning.store(true, std::memory_order_release);
+
+                if (startOnPlay.load(std::memory_order_relaxed))
+                {
+                    lfoForcedActiveByPlay = true;
+                    lfoRuntimeMuted = false;
+                    requestLfoRestart.store(true, std::memory_order_release);
+
+                    if (!lfoActiveParam)
+                        uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
+                }
+            }
+
+            if (!hostPlaying && lastHostPlaying)
+            {
+                transportStopPending.store(true, std::memory_order_release);
+
+                // Make gating effective immediately
+                transportRunning.store(false, std::memory_order_release);
+
+                // HARD STOP
+                lfoRuntimeMuted = true;
+                lfoForcedActiveByNote = false;
+                lfoForcedActiveByPlay = false;
+
+                // Update UI param to OFF
+                uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+            }
+
+            lastHostPlaying = hostPlaying;
+        }
+
+
         double rateHz = rateSliderValueHz;
-        // const double bpm = bpmForUi.load(std::memory_order_relaxed);
 
         if (syncEnabled && bpm > 0.0)
         {
@@ -198,7 +246,8 @@ public:
 
         // Apply LFO Active state (resets phases)
         const bool transportOk = (!syncEnabled) || transportRunning.load(std::memory_order_acquire);
-        const bool shouldRunLfo = (lfoActiveParam && transportOk) || lfoForcedActiveByNote;
+        const bool wantsLfo = lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay;
+        const bool shouldRunLfo = wantsLfo && transportOk;
 
         modztakt::lfo::applyLfoActiveState (shouldRunLfo,
                                    shape,
@@ -507,10 +556,52 @@ private:
     std::atomic<bool> transportStartPending { false };
     std::atomic<bool> transportStopPending  { false };
 
+    std::atomic<bool> startOnPlay { false };
+    bool lfoForcedActiveByPlay = false;
+
     std::atomic<double> bpmForUi { 0.0 };
     std::atomic<bool>   hostTransportRunning { false };
 
+    std::atomic<bool> hostTransportValid { false };
+    bool lastHostPlaying = false; // audio thread only
 
+    // Pending note flags (replaces GlobalMidiCallback storage)
+    PendingMidiFlags pending;
+
+    // MIDI clock (same class as you used in MainComponent)
+    MidiClockHandler midiClock;
+
+    bool useHostClock = true; // plugin hosted: true, standalone with separate clock device: false
+
+    // LFO state
+    static constexpr int maxRoutes = 3; // IMPORTANT: your MainComponent uses 3
+
+    std::array<RouteSnapshot, maxRoutes> lastRouteSnapshot {};
+
+    std::array<LfoRoute, maxRoutes> lfoRoutes {};
+    std::array<double,   maxRoutes> lfoPhase  {};
+
+    juce::Random random;
+
+    std::atomic<bool> requestLfoRestart { false };
+    bool lfoActive = false;
+
+    // EG (temporary: only if EnvelopeComponent is engine-like in your codebase)
+    std::unique_ptr<EnvelopeComponent> envelopeComponent;
+
+    // Throttle state for outgoing MIDI
+    std::unordered_map<int, int>    lastSentValuePerParam;
+    std::unordered_map<int, double> lastSendTimePerParam;
+
+    int    changeThreshold  = 1;
+    double msFloofThreshold = 10.0;
+    double timeMs = 0.0;
+
+    //==================== Scope (shared audio->UI) ====================
+    std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
+    std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
+
+    bool isStandaloneWrapper = false;
 
     //==============================================================================
     inline static APVTS::ParameterLayout createParameterLayout()
@@ -537,7 +628,9 @@ private:
         // Sync mode: 0=Free, 1=MIDI Clock
         p.push_back (std::make_unique<juce::AudioParameterChoice>(
             "syncMode", "Sync Mode",
-            juce::StringArray{ "Free", "MIDI Clock" }, 0));  
+            juce::StringArray{ "Free", "MIDI Clock" }, 0));
+
+        p.push_back (std::make_unique<juce::AudioParameterBool>("playStart", "Start on Play", false));
 
         p.push_back (std::make_unique<juce::AudioParameterChoice>( // syncDivision
             "syncDivision", "Sync Division",
@@ -611,42 +704,6 @@ private:
 
     //==============================================================================
 
-    // Pending note flags (replaces GlobalMidiCallback storage)
-    PendingMidiFlags pending;
-
-    // MIDI clock (same class as you used in MainComponent)
-    MidiClockHandler midiClock;
-
-    bool useHostClock = true; // plugin hosted: true, standalone with separate clock device: false
-
-    // LFO state
-    static constexpr int maxRoutes = 3; // IMPORTANT: your MainComponent uses 3
-
-    std::array<RouteSnapshot, maxRoutes> lastRouteSnapshot {};
-
-    std::array<LfoRoute, maxRoutes> lfoRoutes {};
-    std::array<double,   maxRoutes> lfoPhase  {};
-
-    juce::Random random;
-
-    std::atomic<bool> requestLfoRestart { false };
-    bool lfoActive = false;
-
-    // EG (temporary: only if EnvelopeComponent is engine-like in your codebase)
-    std::unique_ptr<EnvelopeComponent> envelopeComponent;
-
-    // Throttle state for outgoing MIDI
-    std::unordered_map<int, int>    lastSentValuePerParam;
-    std::unordered_map<int, double> lastSendTimePerParam;
-
-    int    changeThreshold  = 1;
-    double msFloofThreshold = 10.0;
-    double timeMs = 0.0;
-
-    //==================== Scope (shared audio->UI) ====================
-    std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
-    std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
-
     // Helpers
 
     inline bool isAnyScopeRouteEnabled() const noexcept
@@ -672,6 +729,8 @@ private:
     inline const double updateTempoFromHostOrMidiClock (bool syncEnabled)
     {
         double bpm = 0.0;
+        bool playing = true;
+        bool valid = false;
 
         if (!syncEnabled)
         {
@@ -680,13 +739,12 @@ private:
             return bpm;
         }
 
-        bool playing = true;
-
         if (auto* playHead = getPlayHead())
         {
             auto pos = playHead->getPosition();
             if (pos.hasValue())
             {
+                valid = true;
                 // BPM (Optional<double>)
                 if (auto hostBpm = pos->getBpm(); hostBpm.hasValue())
                 {
@@ -701,20 +759,15 @@ private:
         }
 
         // Fallback to MIDI clock if host doesn't provide BPM
-        if (bpm <= 0.0)
-            bpm = midiClock.getCurrentBPM();
-
-        bpmForUi.store(bpm, std::memory_order_relaxed);
+        hostTransportValid.store(valid, std::memory_order_relaxed);
         hostTransportRunning.store(playing, std::memory_order_relaxed);
+        bpmForUi.store(bpm <= 0.0 ? midiClock.getCurrentBPM() : bpm, std::memory_order_relaxed);
 
-        return bpm;
+        return bpmForUi.load(std::memory_order_relaxed);
     }
-
-
 
     inline void applyPendingTransportEvents (LfoShape shape, bool syncEnabled)
     {
-        // If sync is off, we don't use transport gating.
         if (!syncEnabled)
         {
             transportRunning.store(true, std::memory_order_release);
@@ -722,7 +775,7 @@ private:
         }
 
         const bool gotStart = transportStartPending.exchange(false, std::memory_order_acq_rel);
-        const bool gotStop  = transportStopPending.exchange(false,  std::memory_order_acq_rel);
+        const bool gotStop  = transportStopPending.exchange(false, std::memory_order_acq_rel);
 
         if (!gotStart && !gotStop)
             return;
@@ -733,7 +786,7 @@ private:
         if (gotStop)
             transportRunning.store(false, std::memory_order_release);
 
-        // Resetting phases + one-shot runtime flags.
+        // Reset phases + one-shot runtime flags
         for (int i = 0; i < maxRoutes; ++i)
         {
             auto& route = lfoRoutes[i];
@@ -749,16 +802,21 @@ private:
 
         if (gotStop)
         {
-            // Stop LFO on transport stop
             lfoRuntimeMuted = true;
             lfoForcedActiveByNote = false;
+            lfoForcedActiveByPlay = false;
+
             uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
         }
         else if (gotStart)
         {
-            // Start should unmute so the LFO can run
             lfoRuntimeMuted = false;
-            uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
+
+            if (startOnPlay.load(std::memory_order_relaxed))
+            {
+                lfoForcedActiveByPlay = true;
+                uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
+            }
         }
     }
 
