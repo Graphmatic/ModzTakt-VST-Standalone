@@ -45,20 +45,67 @@ public:
         apvts.addParameterListener ("syncMode", this);
 
         // Set default selections AFTER everything is wired up
-        syncModeBox.setSelectedId(1); // Free mode by default      
+        syncModeBox.setSelectedId(1); // Free mode by default
+
+        syncModeBox.onChange = [this]()
+        {
+            const int syncOn = syncModeBox.getSelectedId();
+
+            if (syncOn != 2)
+            {
+                bpmLabelTitle.setVisible(false);
+                bpmLabelTitle.setEnabled(false);
+
+                bpmLabel.setVisible(false);
+                bpmLabel.setEnabled(false);
+
+                startOnPLayToggle->setToggleState(false, juce::sendNotification);
+                startOnPLayToggle->setVisible(false);
+                startOnPLayToggle->setEnabled(false);
+
+                startOnPlayToggleLabel.setVisible(false);
+                divisionBox.setEnabled(false);
+            }
+            else
+            {
+                bpmLabelTitle.setVisible(true);
+                bpmLabelTitle.setEnabled(true);
+                addAndMakeVisible(bpmLabelTitle);
+
+                bpmLabel.setVisible(true);
+                bpmLabel.setEnabled(true);
+                addAndMakeVisible(bpmLabel);
+
+                startOnPLayToggle->setToggleState(false, juce::sendNotification);
+                startOnPLayToggle->setVisible(true);
+                startOnPLayToggle->setEnabled(true);
+                addAndMakeVisible(*startOnPLayToggle);
+
+                startOnPlayToggleLabel.setText ("Start on Play", juce::dontSendNotification);
+                startOnPlayToggleLabel.setVisible(true);
+
+                divisionBox.setEnabled(true);
+            }
+            // layout refresh
+            juce::MessageManager::callAsync([this]() { resized(); });
+        };   
 
         // BPM Display
-        bpmLabelTitle.setText("BPM:", juce::dontSendNotification);
         addAndMakeVisible(bpmLabelTitle);
+        bpmLabelTitle.setText("BPM:", juce::dontSendNotification);
+        bpmLabelTitle.setVisible(syncModeBox.getSelectedId() == 2 ? true : false);
+        
+        addAndMakeVisible(bpmLabel);
         bpmLabel.setText("--", juce::dontSendNotification);
         bpmLabel.setColour(juce::Label::textColourId, juce::Colours::aqua);
-        addAndMakeVisible(bpmLabel);
+        bpmLabel.setVisible(syncModeBox.getSelectedId() == 2 ? true : false);
 
         // Start on PLay
+        addAndMakeVisible(startOnPlayToggleLabel);
         startOnPlayToggleLabel.setText ("Start on Play", juce::dontSendNotification);
         startOnPlayToggleLabel.setJustificationType (juce::Justification::centredLeft);
         startOnPlayToggleLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
-        addAndMakeVisible(startOnPlayToggleLabel);
+        startOnPlayToggleLabel.setVisible(syncModeBox.getSelectedId() == 2 ? true : false);
 
         startOnPLayToggle = std::make_unique<LedToggleButton>
         (
@@ -66,6 +113,9 @@ public:
             SetupUI::LedColour::Red
         );
         addAndMakeVisible (*startOnPLayToggle);
+        startOnPLayToggle->setVisible(syncModeBox.getSelectedId() == 2 ? true : false);
+        startOnPLayToggle->setEnabled(syncModeBox.getSelectedId() == 2 ? true : false);
+
         // apvts
         startOnPlayAttach = std::make_unique<ButtonAttachment>(apvts, "playStart", *startOnPLayToggle);
 
@@ -81,6 +131,8 @@ public:
         divisionBox.addItem("1/32", 6);
         divisionBox.addItem("1/8 dotted", 7);
         divisionBox.addItem("1/16 dotted", 8);
+
+        divisionBox.setEnabled(syncModeBox.getSelectedId() == 2 ? true : false);
         addAndMakeVisible(divisionBox);
         // apvts
         syncDivisionAttach = std::make_unique<ChoiceAttachment>(apvts, "syncDivision", divisionBox);
