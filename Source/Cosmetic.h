@@ -10,17 +10,13 @@ namespace SetupUI
 {
     const juce::Colour background = juce::Colour (0xff222326);
     const juce::Colour labelsColor = juce::Colour (0xffB0B0B0);
+
     // Slider tracks
     const juce::Colour sliderTrackGreen = juce::Colour (0xff488c0d);
     const juce::Colour sliderTrackOrange = juce::Colour (0xffbd631e);
     const juce::Colour sliderTrackPurple = juce::Colour (0xff4b0b5c);
+    const juce::Colour sliderTrackBlue = juce::Colour (0xff126fa6);
     const juce::Colour sliderTrackDarkGreen = juce::Colour (0xff2c5707);
-
-    // REF. SVGs
-    // const juce::Colour ledRed    { 0xffE53935 };
-    // const juce::Colour ledGreen  { 0xff43A047 };
-    // const juce::Colour ledOrange { 0xffFB8C00 };
-    // const juce::Colour ledPurple { 0xff8E24AA };
 
     constexpr int toggleSize = 22;
 
@@ -29,6 +25,7 @@ namespace SetupUI
         Red,
         Green,
         Orange,
+        Blue,
         Purple
     };
 }
@@ -49,6 +46,7 @@ inline const void* getOnSvgData (SetupUI::LedColour c)
         case SetupUI::LedColour::Green:  return BinaryData::checkbox_on_green_svg;
         case SetupUI::LedColour::Orange: return BinaryData::checkbox_on_orange_svg;
         case SetupUI::LedColour::Purple: return BinaryData::checkbox_on_purple_svg;
+        case SetupUI::LedColour::Blue:   return BinaryData::checkbox_on_blue_svg;
     }
 
     return nullptr;
@@ -62,6 +60,7 @@ inline int getOnSvgSize (SetupUI::LedColour c)
         case SetupUI::LedColour::Green:  return BinaryData::checkbox_on_green_svgSize;
         case SetupUI::LedColour::Orange: return BinaryData::checkbox_on_orange_svgSize;
         case SetupUI::LedColour::Purple: return BinaryData::checkbox_on_purple_svgSize;
+        case SetupUI::LedColour::Blue:   return BinaryData::checkbox_on_blue_svgSize;
     }
 
     return 0;
@@ -100,7 +99,7 @@ class LedToggleButton : public juce::DrawableButton
 };
 
 // ==========================================
-// CUstom LookAndFeel (sliders)
+// Custom LookAndFeel (sliders)
 // ==========================================
 class ModzTaktLookAndFeel : public juce::LookAndFeel_V4
 {
@@ -110,6 +109,24 @@ public:
         : accentColour (accent) {}
 
     void setAccentColour (juce::Colour c) { accentColour = c; }
+
+    // NEW: Set an outline colour for a specific slider
+    void setSliderOutline (juce::Slider* slider, juce::Colour outlineColour, float thickness = 1.5f)
+    {
+        if (slider != nullptr)
+        {
+            sliderOutlines[slider] = { outlineColour, thickness };
+        }
+    }
+
+    // NEW: Clear the outline for a specific slider
+    void clearSliderOutline (juce::Slider* slider)
+    {
+        if (slider != nullptr)
+        {
+            sliderOutlines.erase (slider);
+        }
+    }
 
     void drawLinearSlider (juce::Graphics& g,
                            int x, int y, int width, int height,
@@ -137,6 +154,18 @@ public:
         const auto handle  = juce::Colour (0xff636363);
         const auto border  = juce::Colour (0xffb0aeb0);
 
+        // Check if this slider has an outline defined
+        auto outlineIt = sliderOutlines.find (&slider);
+        bool hasOutline = (outlineIt != sliderOutlines.end());
+        juce::Colour outlineColour;
+        float outlineThickness = 1.3f;
+        
+        if (hasOutline)
+        {
+            outlineColour = outlineIt->second.colour;
+            outlineThickness = outlineIt->second.thickness;
+        }
+
         if (style == juce::Slider::LinearVertical)
         {
             const float centreX = (float) x + (float) width * 0.5f;
@@ -157,6 +186,13 @@ public:
 
             g.setColour (accentColour);
             g.fillRoundedRectangle (fill, 3.0f);
+
+            // NEW: Draw outline around the filled track if defined
+            if (hasOutline)
+            {
+                g.setColour (outlineColour);
+                g.drawRoundedRectangle (fill, 3.0f, outlineThickness);
+            }
 
             // Handle block
             juce::Rectangle<float> knob (centreX - 8.0f,
@@ -191,6 +227,13 @@ public:
             g.setColour (accentColour);
             g.fillRoundedRectangle (fill, 3.0f);
 
+            // NEW: Draw outline around the filled track if defined
+            if (hasOutline)
+            {
+                g.setColour (outlineColour);
+                g.drawRoundedRectangle (fill, 3.0f, outlineThickness);
+            }
+
             // Handle block
             juce::Rectangle<float> knob (sliderPos - handleSize * 0.5f,
                                          centreY - 8.0f,
@@ -207,4 +250,12 @@ public:
 
 private:
     juce::Colour accentColour;
+    
+    // NEW: Store outline information per slider
+    struct OutlineInfo
+    {
+        juce::Colour colour;
+        float thickness;
+    };
+    std::map<juce::Slider*, OutlineInfo> sliderOutlines;
 };

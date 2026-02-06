@@ -14,6 +14,9 @@ namespace BinaryData
     extern const char*   checkbox_on_svg;
     const int            checkbox_on_svgSize = 1589;
 
+    extern const char*   checkbox_on_blue_svg;
+    const int            checkbox_on_blue_svgSize = 1593;
+
     extern const char*   checkbox_on_green_svg;
     const int            checkbox_on_green_svgSize = 1593;
 
@@ -30,10 +33,10 @@ namespace BinaryData
     const int            scope_pngSize = 6243;
 
     extern const char*   TODO_md;
-    const int            TODO_mdSize = 91;
+    const int            TODO_mdSize = 96;
 
     // Number of elements in the namedResourceList and originalFileNames arrays.
-    const int namedResourceListSize = 8;
+    const int namedResourceListSize = 9;
 
     // Points to the start of a list of resource names.
     extern const char* namedResourceList[];

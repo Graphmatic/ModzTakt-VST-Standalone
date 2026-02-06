@@ -7,8 +7,8 @@
 #include "MidiInParse.h"
 #include "SyntaktParameterTable.h"
 #include "MidiInput.h"
-#include "EnvelopeComponent.h"
-#include "LfoComponent.h"
+#include "EnvelopeEngine.h"
+#include "LfoEngine.h"
 
 // Forward declare editor
 class ModzTaktAudioProcessorEditor;
@@ -53,6 +53,10 @@ public:
     {
         cachedSampleRate = (sampleRate > 0.0 ? sampleRate : 48000.0);
         cachedBlockSize  = samplesPerBlock;
+
+        // EG
+        egEngine.setSampleRate(cachedSampleRate);
+        egEngine.reset();
 
         // If audio added:
         // engine.prepare(cachedSampleRate, cachedBlockSize);
@@ -99,7 +103,6 @@ public:
         // for throttling / scheduling when needed.
 
         const bool lfoActiveParam = apvts.getRawParameterValue("lfoActive")->load() > 0.5f;
-        //xx const int shapeSelectedId = (int) apvts.getRawParameterValue("lfoShape")->load() + 1; // back to your old 1..5 if you still use that
 
         const auto shape = static_cast<LfoShape>( (int) apvts.getRawParameterValue("lfoShape")->load() + 1 );
 
@@ -167,6 +170,28 @@ public:
                 r.hasFinishedOneShot = false;
             r.oneShot = oneShot;
         }
+
+        // EG
+        const int egSourceChannel = (int) apvts.getRawParameterValue("egNoteSourceChannel")->load(); // 1..16=Ch1..16
+
+        modztakt::eg::Params egParams;
+        egParams.enabled          = apvts.getRawParameterValue("egEnabled")->load() > 0.5f;
+        egIsEnabled.store((bool) egParams.enabled, std::memory_order_release);
+
+        egParams.attackSeconds    = apvts.getRawParameterValue("egAttackSec")->load();
+        egParams.holdSeconds      = apvts.getRawParameterValue("egHoldSec")->load();
+        egParams.decaySeconds     = apvts.getRawParameterValue("egDecaySec")->load();
+        egParams.sustain01        = apvts.getRawParameterValue("egSustain")->load();
+        egParams.releaseSeconds   = apvts.getRawParameterValue("egReleaseSec")->load();
+        egParams.velocityAmount01 = apvts.getRawParameterValue("egVelAmount")->load();
+
+        egParams.attackMode = (modztakt::eg::AttackMode) (int) apvts.getRawParameterValue("egAttackMode")->load();
+        egParams.releaseLongMode = apvts.getRawParameterValue("egReleaseLong")->load() > 0.5f;
+
+        egParams.decayCurveMode   = (modztakt::eg::CurveShape) (int) apvts.getRawParameterValue("egDecayCurve")->load();
+        egParams.releaseCurveMode = (modztakt::eg::CurveShape) (int) apvts.getRawParameterValue("egReleaseCurve")->load();
+
+        egEngine.setParams(egParams);
 
         // scope view
         bool scopeOn = apvts.getRawParameterValue("scope")->load() > 0.5f;
@@ -261,8 +286,8 @@ public:
             const float velocity = pending.pendingNoteVelocity.load (std::memory_order_relaxed);
 
             // --- EG ---
-            if (envelopeComponent && envelopeComponent->isEgEnabled())
-                envelopeComponent->noteOn (ch, note, velocity);
+            if (egIsEnabled.load (std::memory_order_relaxed) && ch == egSourceChannel)
+                egEngine.noteOn (velocity);
 
             // --- LFO Note Restart ---
             if (noteRestartToggleState)
@@ -290,8 +315,8 @@ public:
             const int ch   = pending.pendingNoteChannel.load (std::memory_order_relaxed);
             const int note = pending.pendingNoteNumber.load (std::memory_order_relaxed);
 
-            if (envelopeComponent && envelopeComponent->isEgEnabled())
-                envelopeComponent->noteOff (ch, note);
+            if (egIsEnabled.load (std::memory_order_relaxed) && ch == egSourceChannel)
+                egEngine.noteOff ();
         }
 
         // 3) Stop LFO on Note-Off (requested by callback logic)
@@ -331,13 +356,7 @@ public:
         // LFO generation + send (writes into `midi`)
         if (lfoActive && !lfoRuntimeMuted)
         {
-            //double rateHz = rateSliderValueHz;
-
-            // if (syncEnabled && bpm > 0.0)
-            //     rateHz = modztakt::lfo::updateLfoRateFromBpm (rateHz, bpm, syncDivisionId, syncEnabled); // must be processor/engine method now
-
-            // IMPORTANT: timerCallback used phaseInc = rateHz / sampleRate;
-            // sampleRate in plugin is per-sample. We have numSamples in this block:
+            // sampleRate in plugin is per-sample
             const double phaseIncPerSample = rateHz / juce::jmax(1.0, getSampleRate());
 
             // ---- Sub-stepped LFO tick ----
@@ -405,7 +424,7 @@ public:
 
                     midiVal = juce::jlimit (param.minValue, param.maxValue, midiVal);
 
-                    // Replace device send with MidiBuffer addEvent
+                    // MidiBuffer addEvent
                     sendThrottledParamValueToBuffer (midi, i, route.midiChannel, param, midiVal, offset);
 
                     // Scope tap (only if scope overlay enabled a route)
@@ -459,27 +478,34 @@ public:
         }
 
         // 6) EG tick + send (writes into `midi`)
-        if (envelopeComponent && envelopeComponent->isEgEnabled())
+        double eg01 = 0.0;
+        if (egIsEnabled.load (std::memory_order_relaxed))
         {
-            double egMIDIvalue = 0.0;
-
-            if (envelopeComponent->tick (egMIDIvalue))
+            if (egEngine.processBlock(audio.getNumSamples(), eg01))
             {
-                const int paramId = envelopeComponent->selectedEgOutParamsId();
-                const int egValue = mapEgToMidi (egMIDIvalue, paramId);
-                const int egCh    = envelopeComponent->selectedEgOutChannel();
+                //DEBUG
+                #if JUCE_DEBUG
+                    float egScopeValue = static_cast<float>(eg01 * 2.0 - 1.0);
+                    // !!! for debug only, re-use of LFO scopeview: will conflict with third LFO route scope view if set
+                    scopeValues[2].store((float)(egScopeValue), std::memory_order_relaxed);
+                #endif
 
-                if (egCh > 0 && paramId >= 0)
-                {
-                    const auto& param = syntaktParameters[paramId];
+                double egMIDIvalue = 0.0;
+                // map eg01 -> MIDI value using your existing mapEgToMidi() and routing params:
+                const int outCh = (int) apvts.getRawParameterValue("egOutChannel")->load();
+                const int paramIdx = SyntaktParameterEgIndex[(int) apvts.getRawParameterValue("egDestParamIndex")->load()];
+
+                const int egValue = mapEgToMidi (eg01, paramIdx);
+
+                // sendThrottledParamValueToBuffer(...)
+                const auto& param = syntaktParameters[paramIdx];
 
                     sendThrottledParamValueToBuffer (midi,
                                                      0x7FFF,
-                                                     egCh,
+                                                     outCh,
                                                      param,
                                                      egValue,
                                                      0);
-                }
             }
         }
 
@@ -581,8 +607,10 @@ private:
     std::atomic<bool> requestLfoRestart { false };
     bool lfoActive = false;
 
-    // EG (temporary: only if EnvelopeComponent is engine-like in your codebase)
-    std::unique_ptr<EnvelopeComponent> envelopeComponent;
+    // EG
+    modztakt::eg::Engine egEngine;
+
+    std::atomic<bool> egIsEnabled { false };
 
     // Throttle state for outgoing MIDI
     std::unordered_map<int, int>    lastSentValuePerParam;
@@ -596,13 +624,37 @@ private:
     std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
     std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
 
+    // EG filtered destinations
+    static inline juce::Array<int> SyntaktParameterEgIndex = []()
+    {
+        juce::Array<int> indices;
+        for (int i = 0; i < (int) juce::numElementsInArray(syntaktParameters); ++i)
+        {
+            if (syntaktParameters[i].egDestination)
+                indices.add(i);
+        }
+        return indices;
+    }();
+    
+    static inline const juce::StringArray SyntaktParameterEG = []()
+    {
+        juce::StringArray filteredEgDest;
+        for (int i = 0; i < (int) juce::numElementsInArray(syntaktParameters); ++i)
+        {
+            if (syntaktParameters[i].egDestination)
+                filteredEgDest.add(syntaktParameters[i].name);
+        }
+        return filteredEgDest;
+    }();
+    
+
     //==============================================================================
+
     inline static APVTS::ParameterLayout createParameterLayout()
     {
         std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
 
         // Main switches
-        p.push_back (std::make_unique<juce::AudioParameterBool>("enabled", "Enabled", true));
         p.push_back (std::make_unique<juce::AudioParameterBool>("lfoActive", "LFO Active", false));
 
         // LFO core
@@ -692,13 +744,83 @@ private:
             ));
         }
 
+        // EG
+        // Master enable
+        p.push_back (std::make_unique<juce::AudioParameterBool>(
+            "egEnabled", "EG Enabled", false));
+
+        // Time params are stored in seconds (same as your sliders)
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "egAttackSec", "EG Attack",
+            juce::NormalisableRange<float>(0.0005f, 10.0f, 0.0f, 0.40f),
+            0.01f));
+
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "egHoldSec", "EG Hold",
+            juce::NormalisableRange<float>(0.0f, 5.0f),
+            0.0f));
+
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "egDecaySec", "EG Decay",
+            juce::NormalisableRange<float>(0.001f, 10.0f, 0.0f, 0.45f),
+            0.20f));
+
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "egSustain", "EG Sustain",
+            juce::NormalisableRange<float>(0.0f, 1.0f),
+            0.70f));
+
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "egReleaseSec", "EG Release",
+            juce::NormalisableRange<float>(0.005f, 10.0f, 0.0f, 0.45f),
+            0.20f));
+
+        // Velocity amount (0..1)
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "egVelAmount", "EG Velocity Amount",
+            juce::NormalisableRange<float>(0.0f, 1.0f),
+            0.0f));
+
+        // Attack mode (0..2)
+        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+            "egAttackMode", "EG Attack Mode",
+            juce::StringArray { "Fast", "Long", "Snap" }, 0));
+
+        // Release long toggle
+        p.push_back (std::make_unique<juce::AudioParameterBool>(
+            "egReleaseLong", "EG Release Long", false));
+
+        // Curve choices (0..2)
+        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+            "egDecayCurve", "EG Decay Curve",
+            juce::StringArray { "Linear", "Exponential", "Logarithmic" }, 1));
+
+        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+            "egReleaseCurve", "EG Release Curve",
+            juce::StringArray { "Linear", "Exponential", "Logarithmic" }, 1));
+
+        // Input note filtering for EG (0=Disabled, 1..16 channels)
+        p.push_back (std::make_unique<juce::AudioParameterInt>(
+            "egNoteSourceChannel", "EG Note Source Channel",
+            1, 16, 1));
+
+        // EG output MIDI channel (1..16)
+        p.push_back (std::make_unique<juce::AudioParameterInt>(
+            "egOutChannel", "EG Out Channel",
+            1, 16, 1));
+
+        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+            "egDestParamIndex",
+            "EG Destination Param Index",
+            SyntaktParameterEG, 
+            ModzTaktAudioProcessor::findFirstEgDestination()));  // Default to first valid destination
+
     return { p.begin(), p.end() };
     }
 
     //==============================================================================
 
     // Helpers
-
     inline bool isAnyScopeRouteEnabled() const noexcept
     {
         for (const auto& r : scopeRoutesEnabled)
@@ -813,7 +935,18 @@ private:
         }
     }
 
-    inline int mapEgToMidi (double egValue01, int paramId) const
+    // Helper to find first valid destination
+    static int findFirstEgDestination()
+    {
+        for (int i = 0; i < juce::numElementsInArray(syntaktParameters); ++i)
+        {
+            if (syntaktParameters[i].egDestination)
+                return i;
+        }
+        return 0;
+    }
+
+    inline int mapEgToMidi (double egVal, int paramId) const
     {
         const auto& param = syntaktParameters[paramId];
 
@@ -821,10 +954,10 @@ private:
         {
             const double center = (param.minValue + param.maxValue) * 0.5;
             const double range  = (param.maxValue - param.minValue) * 0.5;
-            return (int) (center + (egValue01 * 2.0 - 1.0) * range);
+            return (int) (center + (egVal * 2.0 - 1.0) * range);
         }
 
-        return (int) (param.minValue + egValue01 * (param.maxValue - param.minValue));
+        return (int) (param.minValue + egVal * (param.maxValue - param.minValue));
     }
 
     inline void sendThrottledParamValueToBuffer (juce::MidiBuffer& midiOut,

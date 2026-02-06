@@ -1,8 +1,9 @@
 #pragma once
+
 #include <JuceHeader.h>
 #include "SyntaktParameterTable.h"
 #include "MidiInput.h"
-#include "EnvelopeComponent.h"
+#include "EnvelopeEditorComponent.h"
 #include "ScopeModalComponent.h"
 #include "Cosmetic.h"
 
@@ -13,7 +14,8 @@ class MainComponent : public juce::Component,
 public:
     MainComponent (ModzTaktAudioProcessor& p)
                                             : processor (p),
-                                              apvts (p.getAPVTS())
+                                              apvts (p.getAPVTS()),
+                                              envelopeEditor (apvts)
     {
         // frame
         lfoGroup.setText("LFO");
@@ -21,10 +23,6 @@ public:
         lfoGroup.setColour(juce::GroupComponent::textColourId, juce::Colours::white);
 
         addAndMakeVisible(lfoGroup);
-
-        // Envelop Generator
-        envelopeComponent = std::make_unique<EnvelopeComponent>();
-        addAndMakeVisible(*envelopeComponent);
 
         // Sync Mode
         syncModeLabel.setText("Sync Source:", juce::dontSendNotification);
@@ -482,16 +480,8 @@ public:
                 });
         };
 
-        #if JUCE_DEBUG
-        //EG check in ScopeRoute[0]
-        addAndMakeVisible(showEGinScopeToggle);
-        showEGinScopeToggle.setToggleState(showEGinScope, juce::dontSendNotification);
-        showEGinScopeToggle.onClick = [this]()
-            {
-                showEGinScope = showEGinScopeToggle.getToggleState();
-            };
-
-        #endif
+        // Envelop Generator
+        addAndMakeVisible (envelopeEditor);
 
         // Timer
         startTimerHz(30); // UI refresh, don't need to be faster
@@ -808,8 +798,7 @@ public:
         settingsButton.setClickingTogglesState(false);
 
         // Envelop generator frame
-        if (envelopeComponent != nullptr)
-            envelopeComponent->setBounds(egColumn);
+        envelopeEditor.setBounds (egColumn);
     }
 
     // Oscilloscope pop-up view (not modal)
@@ -837,7 +826,7 @@ public:
         addAndMakeVisible(scopeOverlay.get());
 
         constexpr int scopeSize = 136;
-        constexpr int bottomOffset = 45;
+        constexpr int bottomOffset = 20;
 
         // Position relative to LFO area
         auto lfoBounds = getLocalBounds()
@@ -872,6 +861,8 @@ private:
     // UI Components
     ModzTaktAudioProcessor& processor;
     ModzTaktAudioProcessor::APVTS& apvts;
+
+    EnvelopeEditorComponent envelopeEditor;
 
     static constexpr int maxRoutes = 3;
 
@@ -926,6 +917,7 @@ private:
     using ButtonAttachment  = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ChoiceAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    // LFO
     std::unique_ptr<ButtonAttachment> startOnPlayAttach;
     std::unique_ptr<ButtonAttachment> lfoActiveAttach;
     std::unique_ptr<SliderAttachment> rateAttach, depthAttach;
@@ -935,7 +927,7 @@ private:
     std::unique_ptr<ChoiceAttachment> noteSourceChannelAttach;
     std::unique_ptr<ChoiceAttachment> syncDivisionAttach;
 
-    //LFO Routes UI
+    // LFO Routes UI
     std::array<std::unique_ptr<ChoiceAttachment>, 3> routeChannelAttach;
     std::array<std::unique_ptr<ChoiceAttachment>, 3> routeParamAttach;
 
@@ -943,17 +935,17 @@ private:
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeInvertAttach;
     std::array<std::unique_ptr<ButtonAttachment>, 3> routeOneShotAttach;
 
-    //Scope
+    // Scope
     std::unique_ptr<ButtonAttachment> scopeButtonAttach;
+
+    // EG
+    std::unique_ptr<ChoiceAttachment> noteSourceEgChannelBoxAttach;
 
     bool lastWasRandomShape = false;
 
     // BPM smoothing / throttling
     double displayedBpm = 0.0;
     juce::int64 lastBpmUpdateMs = 0;
-
-    // EG
-    std::unique_ptr<EnvelopeComponent> envelopeComponent;
 
     // settings - Dithering and MIDI throttle
     int changeThreshold = 1; // difference needed before sending

@@ -11,6 +11,8 @@
         <FILE id="E6cyC1" name="checkbox_off.svg" compile="0" resource="1"
               file="Source/checkbox_off.svg"/>
         <FILE id="vL9HBZ" name="checkbox_on.svg" compile="0" resource="1" file="Source/checkbox_on.svg"/>
+        <FILE id="nuFbB8" name="checkbox_on_blue.svg" compile="0" resource="1"
+              file="Source/checkbox_on_blue.svg"/>
         <FILE id="wgZWXH" name="checkbox_on_green.svg" compile="0" resource="1"
               file="Source/checkbox_on_green.svg"/>
         <FILE id="fsun5n" name="checkbox_on_orange.svg" compile="0" resource="1"
@@ -24,9 +26,11 @@
       <FILE id="emDMWr" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
     </GROUP>
     <FILE id="adaQwH" name="Cosmetic.h" compile="0" resource="0" file="Source/Cosmetic.h"/>
-    <FILE id="oJ54sh" name="EnvelopeComponent.h" compile="0" resource="0"
-          file="Source/EnvelopeComponent.h"/>
-    <FILE id="MeCTdH" name="LfoComponent.h" compile="0" resource="0" file="Source/LfoComponent.h"/>
+    <FILE id="mqlfvT" name="EnvelopeEditorComponent.h" compile="0" resource="0"
+          file="Source/EnvelopeEditorComponent.h"/>
+    <FILE id="SyJmvR" name="EnvelopeEngine.h" compile="0" resource="0"
+          file="Source/EnvelopeEngine.h"/>
+    <FILE id="RJ7RAs" name="LfoEngine.h" compile="0" resource="0" file="Source/LfoEngine.h"/>
     <FILE id="dKpP9P" name="MidiInParse.h" compile="0" resource="0" file="Source/MidiInParse.h"/>
     <FILE id="yREiW1" name="MidiInput.h" compile="0" resource="0" file="Source/MidiInput.h"/>
     <FILE id="ikFWi8" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>

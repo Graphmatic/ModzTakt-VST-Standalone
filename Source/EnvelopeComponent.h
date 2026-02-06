@@ -5,11 +5,11 @@
 #include "Cosmetic.h"
 
 class EnvelopeComponent : public juce::Component
+
 {
 public:
-    EnvelopeComponent()
+    EnvelopeComponent ()
     {
-
         setName("Envelope");
 
         // Group
@@ -33,7 +33,7 @@ public:
         noteSourceEgChannelBox.setSelectedId(17); // default OFF
 
         addAndMakeVisible(noteSourceEgChannelBox);
-
+        
         noteSourceEgChannelBox.onChange = [this]()
         {
             const int id = noteSourceEgChannelBox.getSelectedId();
@@ -599,7 +599,7 @@ public:
     }
 
 private:
-   
+
     // ==== UI ==========================================================
     // ---- Group ----
     juce::GroupComponent egGroup;

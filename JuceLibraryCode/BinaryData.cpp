@@ -93,8 +93,55 @@ static const unsigned char temp_binary_data_1[] =
 
 const char* checkbox_on_svg = (const char*) temp_binary_data_1;
 
-//================== checkbox_on_green.svg ==================
+//================== checkbox_on_blue.svg ==================
 static const unsigned char temp_binary_data_2[] =
+"<svg width=\"36\" height=\"36\" viewBox=\"0 0 36 36\" xmlns=\"http://www.w3.org/2000/svg\">\n"
+"\n"
+"  <defs>\n"
+"    <!-- Pressed face gradient -->\n"
+"    <linearGradient id=\"faceDown\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">\n"
+"      <stop offset=\"0%\" stop-color=\"#151515\"></stop>\n"
+"      <stop offset=\"100%\" stop-color=\"#262626\"></stop>\n"
+"    </linearGradient>\n"
+"\n"
+"    <!-- Inner shadow -->\n"
+"    <filter id=\"innerShadow\">\n"
+"      <feOffset dx=\"0\" dy=\"1\"></feOffset>\n"
+"      <feGaussianBlur stdDeviation=\"1.2\"></feGaussianBlur>\n"
+"      <feComposite operator=\"out\" in2=\"SourceAlpha\"></feComposite>\n"
+"      <feColorMatrix type=\"matrix\" values=\"0 0 0 0 0\n"
+"                0 0 0 0 0\n"
+"                0 0 0 0 0\n"
+"                0 0 0 0.65 0\"></feColorMatrix>\n"
+"      <feComposite operator=\"over\" in2=\"SourceGraphic\"></feComposite>\n"
+"    </filter>\n"
+"\n"
+"    <!-- LED glow -->\n"
+"    <filter id=\"glowGreen\" x=\"-80%\" y=\"-80%\" width=\"260%\" height=\"260%\">\n"
+"      <feGaussianBlur stdDeviation=\"2.4\"></feGaussianBlur>\n"
+"    </filter>\n"
+"  </defs>\n"
+"\n"
+"  <!-- Outer frame -->\n"
+"  <rect x=\"2\" y=\"2\" width=\"32\" height=\"32\" rx=\"6\" fill=\"#222326\"></rect>\n"
+"\n"
+"  <!-- Inner recess -->\n"
+"  <rect x=\"4\" y=\"4\" width=\"28\" height=\"28\" rx=\"5\" fill=\"#141414\"></rect>\n"
+"\n"
+"  <!-- Button face (pressed) -->\n"
+"  <rect x=\"6\" y=\"6\" width=\"24\" height=\"24\" rx=\"4\" fill=\"url(#faceDown)\" stroke=\"#126fa6\" stroke-width=\"1.2\" filter=\"url(#innerShadow)\"></rect>\n"
+"\n"
+"  <!-- Underline glow -->\n"
+"  <rect x=\"11.5\" y=\"15.6\" width=\"13\" height=\"4\" rx=\"1.5\" fill=\"#126fa6\" opacity=\"0.35\" filter=\"url(#glowGreen)\"></rect>\n"
+"\n"
+"  <!-- Underline core -->\n"
+"  <rect x=\"12\" y=\"16\" width=\"12\" height=\"3.2\" rx=\"1.1\" fill=\"#126fa6\"></rect>\n"
+"</svg>\n";
+
+const char* checkbox_on_blue_svg = (const char*) temp_binary_data_2;
+
+//================== checkbox_on_green.svg ==================
+static const unsigned char temp_binary_data_3[] =
 "<svg width=\"36\" height=\"36\" viewBox=\"0 0 36 36\" xmlns=\"http://www.w3.org/2000/svg\">\n"
 "\n"
 "  <defs>\n"
@@ -138,10 +185,10 @@ static const unsigned char temp_binary_data_2[] =
 "  <rect x=\"12\" y=\"16\" width=\"12\" height=\"3.2\" rx=\"1.1\" fill=\"#43A047\"></rect>\n"
 "</svg>\n";
 
-const char* checkbox_on_green_svg = (const char*) temp_binary_data_2;
+const char* checkbox_on_green_svg = (const char*) temp_binary_data_3;
 
 //================== checkbox_on_orange.svg ==================
-static const unsigned char temp_binary_data_3[] =
+static const unsigned char temp_binary_data_4[] =
 "<svg width=\"36\" height=\"36\" viewBox=\"0 0 36 36\" xmlns=\"http://www.w3.org/2000/svg\">\n"
 "\n"
 "  <defs>\n"
@@ -185,10 +232,10 @@ static const unsigned char temp_binary_data_3[] =
 "  <rect x=\"12\" y=\"16\" width=\"12\" height=\"3.2\" rx=\"1.1\" fill=\"#FB8C00\"></rect>\n"
 "</svg>\n";
 
-const char* checkbox_on_orange_svg = (const char*) temp_binary_data_3;
+const char* checkbox_on_orange_svg = (const char*) temp_binary_data_4;
 
 //================== checkbox_on_purple.svg ==================
-static const unsigned char temp_binary_data_4[] =
+static const unsigned char temp_binary_data_5[] =
 "<svg width=\"36\" height=\"36\" viewBox=\"0 0 36 36\" xmlns=\"http://www.w3.org/2000/svg\">\n"
 "\n"
 "  <defs>\n"
@@ -232,10 +279,10 @@ static const unsigned char temp_binary_data_4[] =
 "  <rect x=\"12\" y=\"16\" width=\"12\" height=\"3.2\" rx=\"1.1\" fill=\"#8E24AA\"></rect>\n"
 "</svg>\n";
 
-const char* checkbox_on_purple_svg = (const char*) temp_binary_data_4;
+const char* checkbox_on_purple_svg = (const char*) temp_binary_data_5;
 
 //================== checkbox_on_red.svg ==================
-static const unsigned char temp_binary_data_5[] =
+static const unsigned char temp_binary_data_6[] =
 "<svg width=\"36\" height=\"36\" viewBox=\"0 0 36 36\" xmlns=\"http://www.w3.org/2000/svg\">\n"
 "\n"
 "  <defs>\n"
@@ -279,10 +326,10 @@ static const unsigned char temp_binary_data_5[] =
 "  <rect x=\"12\" y=\"16\" width=\"12\" height=\"3.2\" rx=\"1.1\" fill=\"#FF4B4B\"></rect>\n"
 "</svg>\n";
 
-const char* checkbox_on_red_svg = (const char*) temp_binary_data_5;
+const char* checkbox_on_red_svg = (const char*) temp_binary_data_6;
 
 //================== scope.png ==================
-static const unsigned char temp_binary_data_6[] =
+static const unsigned char temp_binary_data_7[] =
 { 137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,56,0,0,0,56,8,6,0,0,0,168,134,59,30,0,0,0,9,112,72,89,115,0,0,0,0,0,0,0,0,0,157,98,38,50,0,0,24,21,73,68,65,84,120,156,237,90,9,144,92,213,117,157,222,183,223,251,222,61,189,78,119,79,207,190,175,154,
 69,179,106,70,163,89,52,26,73,51,146,208,190,32,161,13,36,107,65,66,66,32,33,33,33,131,13,178,100,196,190,25,48,24,175,184,48,118,182,114,72,28,219,113,82,14,229,96,82,78,28,131,177,93,113,12,177,29,219,68,249,39,231,189,30,68,217,8,12,4,155,164,138,
 87,117,171,247,247,223,121,247,220,115,239,125,191,139,138,62,24,31,140,75,13,163,203,237,137,85,215,214,118,118,247,246,174,156,63,58,186,127,114,106,241,201,133,83,83,183,77,44,90,116,219,130,177,241,27,123,251,7,174,110,108,110,94,155,205,149,246,
@@ -373,19 +420,17 @@ static const unsigned char temp_binary_data_6[] =
 129,158,122,153,223,127,142,109,218,19,20,177,93,220,172,166,162,255,83,127,167,188,244,208,211,34,164,112,139,222,96,152,38,232,93,4,112,148,109,206,105,105,70,227,245,124,111,39,69,99,9,85,171,117,246,144,232,173,251,184,15,198,7,227,131,241,255,114,
 252,15,193,213,35,12,249,33,36,231,0,0,0,0,73,69,78,68,174,66,96,130,0,0 };
 
-const char* scope_png = (const char*) temp_binary_data_6;
+const char* scope_png = (const char*) temp_binary_data_7;
 
 //================== TODO.md ==================
-static const unsigned char temp_binary_data_7[] =
+static const unsigned char temp_binary_data_8[] =
 "// TODO\n"
 "\n"
-"EG\n"
-"\n"
-"- NRPN\n"
+"- polyphonic EG\n"
 "\n"
 "- checking if selecting a machine on the Syntakt send any Midi message";
 
-const char* TODO_md = (const char*) temp_binary_data_7;
+const char* TODO_md = (const char*) temp_binary_data_8;
 
 
 const char* getNamedResource (const char* resourceNameUTF8, int& numBytes);
@@ -401,12 +446,13 @@ const char* getNamedResource (const char* resourceNameUTF8, int& numBytes)
     {
         case 0xe8ac9b18:  numBytes = 1172; return checkbox_off_svg;
         case 0xb55aa400:  numBytes = 1589; return checkbox_on_svg;
+        case 0x94599ce3:  numBytes = 1593; return checkbox_on_blue_svg;
         case 0xfdddc3c4:  numBytes = 1593; return checkbox_on_green_svg;
         case 0x91131fb7:  numBytes = 1595; return checkbox_on_orange_svg;
         case 0x9a728a45:  numBytes = 1595; return checkbox_on_purple_svg;
         case 0x2d82ad52:  numBytes = 1589; return checkbox_on_red_svg;
         case 0x7b80d5be:  numBytes = 6243; return scope_png;
-        case 0xe63de430:  numBytes = 91; return TODO_md;
+        case 0xe63de430:  numBytes = 96; return TODO_md;
         default: break;
     }
 
@@ -418,6 +464,7 @@ const char* namedResourceList[] =
 {
     "checkbox_off_svg",
     "checkbox_on_svg",
+    "checkbox_on_blue_svg",
     "checkbox_on_green_svg",
     "checkbox_on_orange_svg",
     "checkbox_on_purple_svg",
@@ -430,6 +477,7 @@ const char* originalFilenames[] =
 {
     "checkbox_off.svg",
     "checkbox_on.svg",
+    "checkbox_on_blue.svg",
     "checkbox_on_green.svg",
     "checkbox_on_orange.svg",
     "checkbox_on_purple.svg",
