@@ -429,56 +429,80 @@ public:
         settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
         settingsButton.setColour(juce::TextButton::textColourOffId, juce::Colours::lightgrey);
 
+        // MIDI Perf menu
         settingsButton.onClick = [this]()
         {
             juce::PopupMenu menu;
-
             juce::PopupMenu throttleSub;
-                            throttleSub.addItem(1, "Off (send every change)", true, changeThreshold == 0);
-                            throttleSub.addItem(2, "1 step (fine)",           true, changeThreshold == 1);
-                            throttleSub.addItem(3, "2 steps",                 true, changeThreshold == 2);
-                            throttleSub.addItem(4, "4 steps",                 true, changeThreshold == 4);
-                            throttleSub.addItem(5, "8 steps (coarse)",        true, changeThreshold == 8);
-
             juce::PopupMenu limiterSub;
-                            limiterSub.addItem(6, "Off (send every change)", true, msFloofThreshold == 0.0);
-                            limiterSub.addItem(7, "0.5ms",                   true, msFloofThreshold == 0.5);
-                            limiterSub.addItem(8, "1.0ms",                   true, msFloofThreshold == 1.0);
-                            limiterSub.addItem(9, "1.5ms",                   true, msFloofThreshold == 1.5);
-                            limiterSub.addItem(10, "2.0ms",                  true, msFloofThreshold == 2.0);
-                            limiterSub.addItem(11, "3.0ms",                  true, msFloofThreshold == 3.0);
-                            limiterSub.addItem(12, "5.0ms",                  true, msFloofThreshold == 5.0);
-
-
+            
+            // Get current indices from APVTS (FIXED)
+            int currentThrottleIndex = 0;
+            int currentLimiterIndex = 0;
+            
+            if (auto* throttleParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiDataThrottle")))
+                currentThrottleIndex = throttleParam->getIndex();
+            
+            if (auto* limiterParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiRateLimiter")))
+                currentLimiterIndex = limiterParam->getIndex();
+            
+            // Build menus (unchanged)
+            throttleSub.addItem(1, "Off (send every change)", true, currentThrottleIndex == 0);
+            throttleSub.addItem(2, "1 step (fine)",           true, currentThrottleIndex == 1);
+            throttleSub.addItem(3, "2 steps",                 true, currentThrottleIndex == 2);
+            throttleSub.addItem(4, "4 steps",                 true, currentThrottleIndex == 3);
+            throttleSub.addItem(5, "8 steps (coarse)",        true, currentThrottleIndex == 4);
+            
+            limiterSub.addItem(6, "Off (send every change)", true, currentLimiterIndex == 0);
+            limiterSub.addItem(7, "0.5ms",                    true, currentLimiterIndex == 1);
+            limiterSub.addItem(8, "1.0ms",                    true, currentLimiterIndex == 2);
+            limiterSub.addItem(9, "1.5ms",                    true, currentLimiterIndex == 3);
+            limiterSub.addItem(10, "2.0ms",                   true, currentLimiterIndex == 4);
+            limiterSub.addItem(11, "3.0ms",                   true, currentLimiterIndex == 5);
+            limiterSub.addItem(12, "5.0ms",                   true, currentLimiterIndex == 6);
+            
             menu.addSectionHeader("Performance");
             menu.addSubMenu("MIDI Data throttle", throttleSub);
             menu.addSubMenu("MIDI Rate limiter", limiterSub);
-
             menu.addSeparator();
-            menu.addItem(99, "zaoum");
-
-
+            menu.addItem(99, "zaOum");
+            
             menu.showMenuAsync(juce::PopupMenu::Options(),
                 [this](int result)
                 {
-                    switch (result)
+                    // Update APVTS parameters (FIXED)
+                    if (result >= 1 && result <= 5)
                     {
-                        case 1: changeThreshold = 0; break;
-                        case 2: changeThreshold = 1; break;
-                        case 3: changeThreshold = 2; break;
-                        case 4: changeThreshold = 4; break;
-                        case 5: changeThreshold = 8; break;
-                        case 6: msFloofThreshold = 0.0; break;
-                        case 7: msFloofThreshold = 0.5; break;
-                        case 8: msFloofThreshold = 1.0; break;
-                        case 9: msFloofThreshold = 1.5; break;
-                        case 10: msFloofThreshold = 2.0; break;
-                        case 11: msFloofThreshold = 3.0; break;
-                        case 12: msFloofThreshold = 5.0; break;
-                        default: break;
+                        const int index = result - 1;
+                        if (auto* param = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiDataThrottle")))
+                        {
+                            *param = index;  // Simple assignment works!
+                        }
+                    }
+                    else if (result >= 6 && result <= 12)
+                    {
+                        const int index = result - 6;
+                        if (auto* param = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiRateLimiter")))
+                        {
+                            *param = index;  // Simple assignment works!
+                        }
                     }
                 });
         };
+        // Listen to settings parameters
+        apvts.addParameterListener("midiDataThrottle", this);
+        apvts.addParameterListener("midiRateLimiter", this);
+
+        // Initialize settings from APVTS
+        if (auto* throttleParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiDataThrottle")))
+        {
+            changeThreshold = ModzTaktAudioProcessor::getChangeThresholdFromIndex(throttleParam->getIndex());
+        }
+
+        if (auto* limiterParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiRateLimiter")))
+        {
+            msFloofThreshold = ModzTaktAudioProcessor::getMsFloofThresholdFromIndex(limiterParam->getIndex());
+        }
 
         // Envelop Generator
         addAndMakeVisible (envelopeEditor);
@@ -959,6 +983,23 @@ private:
         {
             // runs on audio thread: DO NOT touch UI or start/stop devices here
             pendingSyncModeChange.store (true, std::memory_order_release);
+        }
+
+        if (paramID == "midiDataThrottle")
+        {
+            if (auto* param = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiDataThrottle")))
+            {
+                changeThreshold = ModzTaktAudioProcessor::getChangeThresholdFromIndex(param->getIndex());
+                processor.changeThreshold.store(changeThreshold, std::memory_order_relaxed);
+            }
+        }
+        else if (paramID == "midiRateLimiter")
+        {
+            if (auto* param = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiRateLimiter")))
+            {
+                msFloofThreshold = ModzTaktAudioProcessor::getMsFloofThresholdFromIndex(param->getIndex());
+                processor.msFloofThreshold.store(msFloofThreshold, std::memory_order_relaxed);
+            }
         }
     }
 

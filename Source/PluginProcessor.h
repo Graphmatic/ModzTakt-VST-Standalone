@@ -58,6 +58,20 @@ public:
         egEngine.setSampleRate(cachedSampleRate);
         egEngine.reset();
 
+        // MIDI Out throttles/perf
+        // In PluginProcessor constructor or prepareToPlay:
+        if (auto* throttleParam = apvts.getParameter("midiDataThrottle"))
+        {
+            const int index = static_cast<int>(throttleParam->getValue() * 4.0f + 0.5f);
+            changeThreshold.store(getChangeThresholdFromIndex(index), std::memory_order_relaxed);
+        }
+
+        if (auto* limiterParam = apvts.getParameter("midiRateLimiter"))
+        {
+            const int index = static_cast<int>(limiterParam->getValue() * 6.0f + 0.5f);
+            msFloofThreshold.store(getMsFloofThresholdFromIndex(index), std::memory_order_relaxed);
+        }
+
         // If audio added:
         // engine.prepare(cachedSampleRate, cachedBlockSize);
     }
@@ -549,6 +563,47 @@ public:
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
     }
 
+    // Helper to convert APVTS choice index to changeThreshold value
+    static inline int getChangeThresholdFromIndex(int index)
+    {
+        const int values[] = {0, 1, 2, 4, 8};
+        return (index >= 0 && index < 5) ? values[index] : 0;
+    }
+
+    // Helper to convert changeThreshold value to APVTS choice index
+    static inline int getIndexFromChangeThreshold(int threshold)
+    {
+        switch (threshold)
+        {
+            case 0: return 0;
+            case 1: return 1;
+            case 2: return 2;
+            case 4: return 3;
+            case 8: return 4;
+            default: return 0;
+        }
+    }
+
+    // Helper to convert APVTS choice index to msFloofThreshold value
+    static inline double getMsFloofThresholdFromIndex(int index)
+    {
+        const double values[] = {0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0};
+        return (index >= 0 && index < 7) ? values[index] : 0.0;
+    }
+
+    // Helper to convert msFloofThreshold value to APVTS choice index
+    static inline int getIndexFromMsFloofThreshold(double threshold)
+    {
+        if (threshold == 0.0) return 0;
+        if (threshold == 0.5) return 1;
+        if (threshold == 1.0) return 2;
+        if (threshold == 1.5) return 3;
+        if (threshold == 2.0) return 4;
+        if (threshold == 3.0) return 5;
+        if (threshold == 5.0) return 6;
+        return 0;
+    }
+
     //==============================================================================
     inline APVTS&       getAPVTS()       noexcept { return apvts; }
 
@@ -572,6 +627,10 @@ public:
 
     std::atomic<bool>  uiRequestSetRateHz { false };
     std::atomic<float> uiRateHzToSet { 0.0f };
+
+    // Settings parameters (accessed by UI and audio thread)
+    std::atomic<int> changeThreshold { 0 };
+    std::atomic<double> msFloofThreshold { 0.0 };
 
 private:
 
@@ -616,8 +675,6 @@ private:
     std::unordered_map<int, int>    lastSentValuePerParam;
     std::unordered_map<int, double> lastSendTimePerParam;
 
-    int    changeThreshold  = 1;
-    double msFloofThreshold = 10.0;
     double timeMs = 0.0;
 
     //==================== Scope (shared audio->UI) ====================
@@ -813,7 +870,27 @@ private:
             "egDestParamIndex",
             "EG Destination Param Index",
             SyntaktParameterEG, 
-            ModzTaktAudioProcessor::findFirstEgDestination()));  // Default to first valid destination
+            ModzTaktAudioProcessor::findFirstEgDestination()));  // Default to first EG destination
+
+        // ============================================================================
+        // SETTINGS MENU PARAMETERS (Performance)
+        // ============================================================================
+
+        // MIDI Data Throttle (change threshold in steps)
+        // Options: 0 (Off), 1 (fine), 2, 4, 8 (coarse)
+        p.push_back(std::make_unique<juce::AudioParameterChoice>(
+            "midiDataThrottle",
+            "MIDI Data Throttle",
+            juce::StringArray{"Off (send every change)", "1 step (fine)", "2 steps", "4 steps", "8 steps (coarse)"},
+            0));  // Default to index 0 = Off
+
+        // MIDI Rate Limiter (in milliseconds)
+        // Options: 0.0 (Off), 0.5ms, 1.0ms, 1.5ms, 2.0ms, 3.0ms, 5.0ms
+        p.push_back(std::make_unique<juce::AudioParameterChoice>(
+            "midiRateLimiter",
+            "MIDI Rate Limiter",
+            juce::StringArray{"Off (send every change)", "0.5ms", "1.0ms", "1.5ms", "2.0ms", "3.0ms", "5.0ms"},
+            0));  // Default to index 0 = Off
 
     return { p.begin(), p.end() };
     }
@@ -1001,6 +1078,8 @@ private:
         midiOut.addEvent (juce::MidiMessage::controllerEvent (midiChannel, 6,  valueMSB),   sampleOffsetInBlock);
         midiOut.addEvent (juce::MidiMessage::controllerEvent (midiChannel, 38, valueLSB),   sampleOffsetInBlock);
     }
+
+    
 
 public:
     APVTS apvts;
