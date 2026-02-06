@@ -4,7 +4,7 @@
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" companyEmail="makethembusy@proton.me"
               bundleIdentifier="com.zaoum.modztakt" defines="JUCE_ALSA=1&#10;JUCE_ALSA_MIDI=1&#10;JUCE_JACK=0&#10;"
               pluginFormats="buildStandalone,buildVST3" pluginCharacteristicsValue="pluginIsMidiEffectPlugin,pluginProducesMidiOut,pluginWantsMidiIn"
-              pluginVST3Category="Fx">
+              pluginVST3Category="Fx" companyWebsite="makethembusy">
   <MAINGROUP id="TYoiW9" name="ModzTakt_plugin">
     <GROUP id="{2B64A09A-E9B6-0936-1CA3-4333E5C25275}" name="Source">
       <GROUP id="{15BC47E3-A028-7859-6148-068B7D289598}" name="Resources">

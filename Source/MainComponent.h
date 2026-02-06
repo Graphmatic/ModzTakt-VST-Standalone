@@ -325,6 +325,9 @@ public:
             routeChannelAttach[i] = std::make_unique<ChoiceAttachment>(apvts, "route" + rs + "_channel", routeChannelBoxes[i]);
             routeParamAttach[i]   = std::make_unique<ChoiceAttachment>(apvts, "route" + rs + "_param",    routeParameterBoxes[i]);
 
+            lastValidRouteChanId[i]  = routeChannelBoxes[i].getSelectedId();
+            lastValidRouteParamId[i] = routeParameterBoxes[i].getSelectedId();
+
             routeBipolarAttach[i] = std::make_unique<ButtonAttachment>(apvts, "route" + rs + "_bipolar", *routeBipolarToggles[i]);
             routeInvertAttach[i]  = std::make_unique<ButtonAttachment>(apvts, "route" + rs + "_invert",  *routeInvertToggles[i]);
             routeOneShotAttach[i] = std::make_unique<ButtonAttachment>(apvts, "route" + rs + "_oneshot", *routeOneShotToggles[i]);
@@ -353,6 +356,10 @@ public:
                 // Only show oneshot if route enabled AND noteRestart is enabled
                 const bool noteRestartOn = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
                 routeOneShotToggles[i]->setVisible(enabled && noteRestartOn);
+
+                // two routes cannot be set to same Ch + CC
+                refreshRouteParamAvailability();
+                enforceRouteExclusivity(i);
         
                 // Layout update
                 juce::MessageManager::callAsync([this]() { resized(); });
@@ -361,13 +368,16 @@ public:
             // When parameter changes: optionally force bipolar according to parameter.isBipolar
             routeParameterBoxes[i].onChange = [this, i]()
             {
+                // reject illegal selection / correct APVTS if needed
+                enforceRouteExclusivity(i);
+
+                // After enforcement, read the (possibly corrected) selection
                 const int idx = routeParameterBoxes[i].getSelectedId() - 1;
                 if (idx < 0 || idx >= juce::numElementsInArray(syntaktParameters))
                     return;
 
                 const bool paramIsBipolar = syntaktParameters[idx].isBipolar;
 
-                // If you want "auto-init bipolar" each time user picks a param:
                 if (auto* p = apvts.getParameter("route" + juce::String(i) + "_bipolar"))
                 {
                     p->beginChangeGesture();
@@ -385,6 +395,10 @@ public:
             const bool noteRestartNow = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
             routeOneShotToggles[i]->setVisible(enabledNow && noteRestartNow);
         }
+
+        refreshRouteParamAvailability();
+        for (int i = 0; i < maxRoutes; ++i)
+            enforceRouteExclusivity(i);
 
         // scope image button
         scopeIcon = juce::ImageCache::getFromMemory(
@@ -1115,4 +1129,163 @@ private:
             bpmLabel.setText("--", juce::dontSendNotification);
         }
     }
+
+    // --- Route exclusivity UI (channel + parameter must be unique per channel) ---
+    std::array<int, maxRoutes> lastValidRouteParamId { 1, 1, 1 };  // ComboBox IDs (p+1)
+    std::array<int, maxRoutes> lastValidRouteChanId  { 1, 1, 1 };  // ComboBox IDs (1=Disabled, 2..17=Ch)
+
+    bool updatingRouteCombos = false;
+
+    int getRouteChannelNumber(int routeIndex) const
+    {
+        // UI ComboBox IDs: 1=Disabled, 2..17 = Ch1..Ch16
+        const int id = routeChannelBoxes[routeIndex].getSelectedId();
+        return (id <= 1) ? 0 : (id - 1); // return 0 if Disabled
+    }
+
+    int getRouteParamIndex(int routeIndex) const
+    {
+        // UI ComboBox IDs: 1..N => param index 0..N-1
+        const int id = routeParameterBoxes[routeIndex].getSelectedId();
+        return (id <= 0) ? -1 : (id - 1);
+    }
+
+    bool isParamTakenOnChannel(int channel, int paramIdx, int exceptRoute) const
+    {
+        if (channel <= 0 || paramIdx < 0) return false;
+
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            if (r == exceptRoute) continue;
+
+            if (getRouteChannelNumber(r) == channel && getRouteParamIndex(r) == paramIdx)
+                return true;
+        }
+        return false;
+    }
+
+    // Disable items that are already used by other routes on same MIDI channel.
+    // Always keep the currently selected item enabled (so it doesn't "grey out" itself).
+    void refreshRouteParamAvailability()
+    {
+        if (updatingRouteCombos) return;
+        updatingRouteCombos = true;
+
+        const int numParams = juce::numElementsInArray(syntaktParameters);
+
+        for (int i = 0; i < maxRoutes; ++i)
+        {
+            const int ch = getRouteChannelNumber(i);
+
+            // if disabled route, keep everything enabled (or you can disable the whole box)
+            if (ch <= 0)
+            {
+                for (int p = 0; p < numParams; ++p)
+                    routeParameterBoxes[i].setItemEnabled(p + 1, true);
+
+                continue;
+            }
+
+            const int currentParamIdx = getRouteParamIndex(i);
+
+            for (int p = 0; p < numParams; ++p)
+            {
+                const bool taken = isParamTakenOnChannel(ch, p, i);
+                const bool isCurrent = (p == currentParamIdx);
+                routeParameterBoxes[i].setItemEnabled(p + 1, !taken || isCurrent);
+            }
+        }
+
+        updatingRouteCombos = false;
+    }
+
+    // If current selection is illegal (same channel+param as another route), fix it.
+    // Strategy: revert to last valid if still valid; else choose first available.
+    void enforceRouteExclusivity(int routeIndex)
+    {
+        if (updatingRouteCombos) return;
+        updatingRouteCombos = true;
+
+        const int ch = getRouteChannelNumber(routeIndex);
+        const int idx = getRouteParamIndex(routeIndex);
+
+        auto isLegal = [&](int chan, int paramIdx) -> bool
+        {
+            return (chan <= 0) || (paramIdx < 0) || !isParamTakenOnChannel(chan, paramIdx, routeIndex);
+        };
+
+        if (!isLegal(ch, idx))
+        {
+            // Try revert to last valid
+            const int lastParamId = lastValidRouteParamId[routeIndex];
+            const int lastIdx = lastParamId - 1;
+
+            if (lastParamId > 0 && isLegal(ch, lastIdx))
+            {
+                routeParameterBoxes[routeIndex].setSelectedId(lastParamId, juce::dontSendNotification);
+
+                // Push back into APVTS (because we used dontSendNotification)
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
+                        apvts.getParameter("route" + juce::String(routeIndex) + "_param")))
+                {
+                    p->beginChangeGesture();
+                    *p = (lastParamId - 1); // APVTS choice index
+                    p->endChangeGesture();
+                }
+            }
+            else
+            {
+                // Find first available param
+                const int numParams = juce::numElementsInArray(syntaktParameters);
+                int foundParamId = 0;
+
+                for (int p = 0; p < numParams; ++p)
+                {
+                    if (isLegal(ch, p))
+                    {
+                        foundParamId = p + 1;
+                        break;
+                    }
+                }
+
+                if (foundParamId > 0)
+                {
+                    routeParameterBoxes[routeIndex].setSelectedId(foundParamId, juce::dontSendNotification);
+
+                    if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
+                            apvts.getParameter("route" + juce::String(routeIndex) + "_param")))
+                    {
+                        p->beginChangeGesture();
+                        *p = (foundParamId - 1);
+                        p->endChangeGesture();
+                    }
+                }
+                else
+                {
+                    // No free params left on that channel -> safest is disable the route
+                    routeChannelBoxes[routeIndex].setSelectedId(1, juce::dontSendNotification);
+
+                    if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(
+                            apvts.getParameter("route" + juce::String(routeIndex) + "_channel")))
+                    {
+                        p->beginChangeGesture();
+                        *p = 0; // APVTS channel choice index: 0=Disabled
+                        p->endChangeGesture();
+                    }
+                }
+            }
+        }
+        else
+        {
+            // current is legal -> store as last valid
+            lastValidRouteParamId[routeIndex] = routeParameterBoxes[routeIndex].getSelectedId();
+            lastValidRouteChanId[routeIndex]  = routeChannelBoxes[routeIndex].getSelectedId();
+        }
+
+        updatingRouteCombos = false;
+
+        // Refresh enable/disable state after any correction
+        refreshRouteParamAvailability();
+    }
+
 };

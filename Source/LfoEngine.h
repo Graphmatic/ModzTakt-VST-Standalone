@@ -213,13 +213,11 @@ namespace modztakt::lfo
         {
             const auto rs = juce::String((int)i);
 
-            const int chChoice0 =
-                (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16=Ch1..16
+            const int chChoice0 = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16=Ch1..16
 
             const int midiChannel = (chChoice0 == 0) ? 0 : chChoice0;
 
-            const int paramIdx =
-                (int) apvts.getRawParameterValue("route" + rs + "_param")->load();   // 0..N-1
+            const int paramIdx = (int) apvts.getRawParameterValue("route" + rs + "_param")->load();   // 0..N-1
 
             bool bipolar =
                 apvts.getRawParameterValue("route" + rs + "_bipolar")->load() > 0.5f;
@@ -237,8 +235,40 @@ namespace modztakt::lfo
                 invert  = false;
             }
 
+            // ============================================================
+            // Enforce exclusivity: (channel, param) must be unique.
+            // Deterministic rule: first route (lowest index) wins.
+            // Conflicting later routes are force-disabled at engine level.
+            // ============================================================
+            int effectiveChannel = midiChannel;
+
+            if (effectiveChannel != 0 && paramIdx >= 0)
+            {
+                for (size_t j = 0; j < i; ++j)
+                {
+                    const auto js = juce::String((int)j);
+
+                    const int chJ0 = (int) apvts.getRawParameterValue("route" + js + "_channel")->load();
+                    const int chJ  = (chJ0 == 0) ? 0 : chJ0;
+
+                    if (chJ == 0)
+                        continue;
+
+                    const int paramJ = (int) apvts.getRawParameterValue("route" + js + "_param")->load();
+
+                    if (chJ == effectiveChannel && paramJ == paramIdx)
+                    {
+                        effectiveChannel = 0; // disable this route
+                        break;
+                    }
+                }
+            }
+
             // Detect changes (so we can reset runtime-only flags safely)
-            const RouteSnapshot now { midiChannel, paramIdx, bipolar, invert, oneShot };
+            // remove
+            //const RouteSnapshot now { midiChannel, paramIdx, bipolar, invert, oneShot };
+            const RouteSnapshot now { effectiveChannel, paramIdx, bipolar, invert, oneShot };
+
             const auto& prev = lastRouteSnapshot[i];
 
             const bool channelChanged = (now.midiChannel != prev.midiChannel);

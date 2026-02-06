@@ -367,23 +367,32 @@ public:
                 lfoActive = true;
         }
 
-        // LFO generation + send (writes into `midi`)
+        // ------------------------------------------------------------
+        // 5.5) EG tick ONCE per block (cache for EG->LFO + EG output)
+        // Put this BEFORE the LFO generation block.
+        // ------------------------------------------------------------
+        double eg01 = 0.0;
+        bool egHasValue = false;
+
+        if (egIsEnabled.load(std::memory_order_relaxed))
+        {
+            egHasValue = egEngine.processBlock(audio.getNumSamples(), eg01);
+            eg01 = juce::jlimit(0.0, 1.0, eg01);
+        }
+
+
+        // ------------------------------------------------------------
+        // LFO generation + send (writes into `midi`)  -- SINGLE SEND PATH
+        // ------------------------------------------------------------
         if (lfoActive && !lfoRuntimeMuted)
         {
             // sampleRate in plugin is per-sample
             const double phaseIncPerSample = rateHz / juce::jmax(1.0, getSampleRate());
 
-            // ---- Sub-stepped LFO tick ----
-            // In the old standalone UI, the LFO advanced once per timer tick.
-            // In plugin context, blocks can be large (e.g. 256/512 samples), so a single
-            // "once-per-block" update can sound/feel stepped at higher rates.
-            // We therefore update the LFO multiple times within the block and emit MIDI
-            // at the corresponding sample offsets.
             const int blockSize = audio.getNumSamples();
 
-            // Choose a step size (in samples). Smaller step = smoother but more MIDI events.
-            // This keeps modulation smooth without going per-sample.
-            int stepSamples = (int) std::round (juce::jmax (1.0, getSampleRate()) / juce::jmax (0.001, rateHz) / 128.0); //edit last var: 64=stepper / 256=smoother
+            int stepSamples = (int) std::round (juce::jmax (1.0, getSampleRate())
+                                                / juce::jmax (0.001, rateHz) / 128.0);
             stepSamples = juce::jlimit (8, 128, stepSamples);
             stepSamples = juce::jlimit (1, juce::jmax (1, blockSize), stepSamples);
 
@@ -404,24 +413,96 @@ public:
 
                     // Accumulate before advancing
                     route.totalPhaseAdvanced += phaseIncThis;
-                    
+
                     const bool wrapped = modztakt::lfo::advancePhase (lfoPhase[i], phaseIncThis);
-                    
-                    const double shapeComputed = modztakt::lfo::computeWaveform (shape,
-                                                          lfoPhase[i],
-                                                          route.bipolar,
-                                                          route.invertPhase,
-                                                          random);
+
+                    double shapeComputed = modztakt::lfo::computeWaveform (shape,
+                                                                          lfoPhase[i],
+                                                                          route.bipolar,
+                                                                          route.invertPhase,
+                                                                          random);
 
                     // One-shot: complete after full cycle
                     if (route.oneShot && route.totalPhaseAdvanced >= 1.0)
-                    {
                         route.hasFinishedOneShot = true;
-                    }
-                    
+
                     const auto& param = syntaktParameters[route.parameterIndex];
+
                     const double depth = depthSliderValue;
 
+                    // ------------------------------------------------------------
+                    // EG->LFO: gate + neutral on end (shape-domain only)
+                    // ------------------------------------------------------------
+                    bool shouldSend = true;
+
+                    const bool egToThisRoute =
+                        apvts.getRawParameterValue("egToLfoRoute" + juce::String(i))->load() > 0.5f;
+
+                    if (egToThisRoute)
+                    {
+                        const bool gateOpen = egHasValue;
+
+                        // Gate falling edge: start neutral ramp
+                        if (!gateOpen && egGateWasOpen[i])
+                        {
+                            neutralRampActive[i] = true;
+
+                            // lastShapeDepthVal is in (shape * depth) domain. Convert back to shape domain.
+                            const double safeDepth = juce::jmax(1.0e-6, depth);
+                            neutralRampStart[i]  = lastShapeDepthVal[i] / safeDepth;
+                            neutralRampTarget[i] = neutralShapeForRoute(route.bipolar, route.invertPhase);
+                            neutralRampPos[i]    = 0;
+                        }
+
+                        // Gate rising edge: cancel ramp
+                        if (gateOpen)
+                            neutralRampActive[i] = false;
+
+                        egGateWasOpen[i] = gateOpen;
+
+                        if (gateOpen)
+                        {
+                            // Dynamic depth: scale by EG (0..1) by scaling shape
+                            shapeComputed *= eg01;
+                        }
+                        else
+                        {
+                            // Gate closed: either ramp to neutral (and still send), or fully mute (no send)
+                            if (neutralRampActive[i])
+                            {
+                                const double t =
+                                    (neutralRampSteps <= 1)
+                                        ? 1.0
+                                        : (double) neutralRampPos[i] / (double) (neutralRampSteps - 1);
+
+                                shapeComputed = neutralRampStart[i]
+                                              + (neutralRampTarget[i] - neutralRampStart[i]) * t;
+
+                                ++neutralRampPos[i];
+                                if (neutralRampPos[i] >= neutralRampSteps)
+                                    neutralRampActive[i] = false;
+
+                                // Keep shouldSend = true so the SINGLE send path below emits the ramp value
+                            }
+                            else
+                            {
+                                shouldSend = false;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // EG->LFO off: clear state so we don't edge-trigger later
+                        egGateWasOpen[i] = false;
+                        neutralRampActive[i] = false;
+                    }
+
+                    if (!shouldSend)
+                        continue;
+
+                    // ------------------------------------------------------------
+                    // SINGLE mapping + send path (always here, once)
+                    // ------------------------------------------------------------
                     int midiVal = 0;
 
                     if (route.bipolar)
@@ -438,18 +519,19 @@ public:
 
                     midiVal = juce::jlimit (param.minValue, param.maxValue, midiVal);
 
-                    // MidiBuffer addEvent
+                    // Store last (shape * depth) so ramp starts from the true last output
+                    lastShapeDepthVal[i] = shapeComputed * depth;
+
                     sendThrottledParamValueToBuffer (midi, i, route.midiChannel, param, midiVal, offset);
 
-                    // Scope tap (only if scope overlay enabled a route)
                     if (scopeRoutesEnabled[i].load(std::memory_order_relaxed))
-                    {
                         scopeValues[i].store((float)(shapeComputed * depth), std::memory_order_relaxed);
-                    }
+
+                    (void) wrapped; // keep if you don't use it right now
                 }
             }
 
-            // AUTO-STOP AFTER ONE-SHOT
+            // AUTO-STOP AFTER ONE-SHOT (unchanged)
             {
                 bool anyEnabledRoute = false;
                 bool anyRouteStillRunning = false;
@@ -463,14 +545,12 @@ public:
 
                     anyEnabledRoute = true;
 
-                    // If any enabled route is NOT one-shot, LFO should keep running
                     if (!r.oneShot)
                     {
                         anyRouteStillRunning = true;
                         break;
                     }
 
-                    // Enabled + one-shot: still running until finished
                     if (!r.hasFinishedOneShot)
                     {
                         anyRouteStillRunning = true;
@@ -478,49 +558,38 @@ public:
                     }
                 }
 
-                // Only auto-stop if we had something enabled and all enabled routes were one-shot and finished
                 if (anyEnabledRoute && !anyRouteStillRunning)
                 {
-                    // stop producing values
                     lfoRuntimeMuted = true;
                     lfoForcedActiveByNote = false;
-
-                    // Request UI to set the parameter OFF so button syncs visually
                     uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
                 }
             }
         }
 
-        // 6) EG tick + send (writes into `midi`)
-        double eg01 = 0.0;
-        if (egIsEnabled.load (std::memory_order_relaxed))
+        // ------------------------------------------------------------
+        // 6) EG send (re-use eg01 computed earlier in the block)
+        // ------------------------------------------------------------
+        if (egHasValue)
         {
-            if (egEngine.processBlock(audio.getNumSamples(), eg01))
-            {
-                //DEBUG
-                #if JUCE_DEBUG
-                    float egScopeValue = static_cast<float>(eg01 * 2.0 - 1.0);
-                    // !!! for debug only, re-use of LFO scopeview: will conflict with third LFO route scope view if set
-                    scopeValues[2].store((float)(egScopeValue), std::memory_order_relaxed);
-                #endif
+           #if JUCE_DEBUG
+            const float egScopeValue = (float)(eg01 * 2.0 - 1.0);
+            scopeValues[2].store(egScopeValue, std::memory_order_relaxed);
+           #endif
 
-                double egMIDIvalue = 0.0;
-                // map eg01 -> MIDI value using your existing mapEgToMidi() and routing params:
-                const int outCh = (int) apvts.getRawParameterValue("egOutChannel")->load();
-                const int paramIdx = SyntaktParameterEgIndex[(int) apvts.getRawParameterValue("egDestParamIndex")->load()];
+            const int outCh    = (int) apvts.getRawParameterValue("egOutChannel")->load();
+            const int destIdx  = (int) apvts.getRawParameterValue("egDestParamIndex")->load();
+            const int paramIdx = SyntaktParameterEgIndex[destIdx];
+            const int egValue  = mapEgToMidi(eg01, paramIdx);
 
-                const int egValue = mapEgToMidi (eg01, paramIdx);
+            const auto& param = syntaktParameters[paramIdx];
 
-                // sendThrottledParamValueToBuffer(...)
-                const auto& param = syntaktParameters[paramIdx];
-
-                    sendThrottledParamValueToBuffer (midi,
-                                                     0x7FFF,
-                                                     outCh,
-                                                     param,
-                                                     egValue,
-                                                     0);
-            }
+            sendThrottledParamValueToBuffer(midi,
+                                            0x7FFF,
+                                            outCh,
+                                            param,
+                                            egValue,
+                                            0);
         }
 
         // Advance global time after processing the block
@@ -661,6 +730,20 @@ private:
     std::array<LfoRoute, maxRoutes> lfoRoutes {};
     std::array<double,   maxRoutes> lfoPhase  {};
 
+    // ===== EG->LFO gate + neutral ramp (per route) =====
+    std::array<bool,   maxRoutes> egGateWasOpen     { false, false, false };
+
+    // Store last *shape value* after depth (so we can ramp smoothly in the same domain)
+    // This should be the value you scope: shapeComputed * depth  (range ~ [-depth..+depth])
+    std::array<double, maxRoutes> lastShapeDepthVal { 0.0, 0.0, 0.0 };
+
+    std::array<bool,   maxRoutes> neutralRampActive { false, false, false };
+    std::array<double, maxRoutes> neutralRampStart  { 0.0, 0.0, 0.0 };
+    std::array<double, maxRoutes> neutralRampTarget { 0.0, 0.0, 0.0 };
+    std::array<int,    maxRoutes> neutralRampPos    { 0, 0, 0 };
+
+    static constexpr int neutralRampSteps = 8; // per-block steps (fast, but smooth enough)
+
     juce::Random random;
 
     std::atomic<bool> requestLfoRestart { false };
@@ -704,6 +787,22 @@ private:
         return filteredEgDest;
     }();
     
+    // lerp = "Calculates a number between two numbers at a specific increment"
+    static inline double lerp(double a, double b, double t) noexcept
+    {
+        return a + (b - a) * t;
+    }
+
+    // Target in "shape*depth domain" (NOT MIDI domain):
+    // bipolar -> 0.0
+    // unipolar -> -1.0 (so (shape+1)*0.5 => 0)
+    // unipolar+invert -> +1.0 (so (shape+1)*0.5 => 1)
+    static inline double neutralShapeForRoute(bool bipolar, bool invertPhase) noexcept
+    {
+        if (bipolar) return 0.0;
+        return invertPhase ? +1.0 : -1.0;
+    }
+
 
     //==============================================================================
 
@@ -872,17 +971,27 @@ private:
             SyntaktParameterEG, 
             ModzTaktAudioProcessor::findFirstEgDestination()));  // Default to first EG destination
 
-        // ============================================================================
-        // SETTINGS MENU PARAMETERS (Performance)
-        // ============================================================================
+        // EG -> LFO cross-mod routing
+        // Per LFO route: if enabled, EG scales LFO depth (dynamic depth)
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs = juce::String(r);
 
+            p.push_back (std::make_unique<juce::AudioParameterBool>(
+                "egToLfoRoute" + rs,
+                "EG -> LFO Route " + rs,
+                false
+            ));
+        }
+
+        // SETTINGS MENU PARAMETERS (Performance)
         // MIDI Data Throttle (change threshold in steps)
         // Options: 0 (Off), 1 (fine), 2, 4, 8 (coarse)
         p.push_back(std::make_unique<juce::AudioParameterChoice>(
             "midiDataThrottle",
             "MIDI Data Throttle",
             juce::StringArray{"Off (send every change)", "1 step (fine)", "2 steps", "4 steps", "8 steps (coarse)"},
-            0));  // Default to index 0 = Off
+            1));  // Default to index 0 = Off
 
         // MIDI Rate Limiter (in milliseconds)
         // Options: 0.0 (Off), 0.5ms, 1.0ms, 1.5ms, 2.0ms, 3.0ms, 5.0ms

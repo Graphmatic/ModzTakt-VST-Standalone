@@ -196,6 +196,27 @@ public:
         releaseLogLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible(releaseLogLabel);
 
+        // EG -> LFO cross-mod toggles
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs = juce::String(r);
+
+            egToLfoToggles[r] = std::make_unique<LedToggleButton>(
+                "EG->LFO " + juce::String(r + 1),
+                SetupUI::LedColour::Orange
+            );
+
+            addAndMakeVisible(*egToLfoToggles[r]);
+            egToLfoToggles[r]->setButtonText("");
+
+            egToLfoLabels[r].setText("EG to LFO route " + juce::String(r + 1), juce::dontSendNotification);
+            egToLfoLabels[r].setJustificationType(juce::Justification::centredLeft);
+            egToLfoLabels[r].setColour(juce::Label::textColourId, SetupUI::labelsColor);
+            addAndMakeVisible(egToLfoLabels[r]);
+
+            egToLfoAttach[r] = std::make_unique<ButtonAttachment>(apvts, "egToLfoRoute" + rs, *egToLfoToggles[r]);
+        }
+
         // Keep LED states in sync with automation/preset changes
         startTimerHz(20);
         
@@ -395,9 +416,37 @@ public:
 
         content.removeFromTop(20);
 
-        // ---- routing rows ----
+        // routing rows
         placeRow(midiChannelLabel, midiChannelBox);  
         placeRow(destinationLabel, destinationBox);
+
+        content.removeFromTop(30);
+
+        // EG -> LFO cross-mod rows
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            auto egToLfoRoute = content.removeFromTop(rowHeight + 4);
+
+            juce::FlexBox egToLfoRouteFlex;
+            egToLfoRouteFlex.flexDirection = juce::FlexBox::Direction::row;
+            egToLfoRouteFlex.alignItems    = juce::FlexBox::AlignItems::flexStart;
+            egToLfoRouteFlex.justifyContent= juce::FlexBox::JustifyContent::flexStart;
+
+            egToLfoRouteFlex.items.add(juce::FlexItem(*egToLfoToggles[r])
+                                                .withWidth(22)
+                                                .withHeight(rowHeight)
+                                                .withMargin({ 0, 4, 0, 0 }));
+            egToLfoRouteFlex.items.add(juce::FlexItem(egToLfoLabels[r])
+                                                .withWidth(100)
+                                                .withHeight(rowHeight)
+                                                .withMargin({ 0, 8, 0, 0 }));
+
+            egToLfoRouteFlex.performLayout(egToLfoRoute);
+
+        }
+        //    placeRow(egToLfoLabels[r], *egToLfoToggles[r]);
+
+        
 
     }
 
@@ -702,6 +751,14 @@ private:
     std::unique_ptr<LedToggleButton> releaseLinear, releaseExpo, releaseLog;
     std::unique_ptr<ButtonAttachment> releaseLongAttach;
     juce::Label releaseLinearLabel, releaseExpoLabel, releaseLogLabel, releaseLongLabel;
+
+    // --- EG -> LFO cross-mod UI ---
+    static constexpr int maxRoutes = 3;
+
+    std::array<std::unique_ptr<LedToggleButton>, maxRoutes> egToLfoToggles;
+    std::array<juce::Label, maxRoutes>                      egToLfoLabels;
+    std::array<std::unique_ptr<ButtonAttachment>, maxRoutes> egToLfoAttach;
+
 
     // look & feel from your Cosmetic.h
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };
