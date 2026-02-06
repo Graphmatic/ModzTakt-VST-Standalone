@@ -392,7 +392,7 @@ public:
             BinaryData::scope_pngSize
         );
 
-        scopeButton.setClickingTogglesState(true);
+        scopeButton.setClickingTogglesState(false);
         scopeButton.setToggleable(true);
 
         // Assign images
