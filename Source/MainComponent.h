@@ -342,16 +342,16 @@ public:
                 routeBipolarToggles[i]->setVisible(enabled);
                 routeInvertToggles[i]->setVisible(enabled);
 
-                // If disabling the route, force OneShot param OFF (optional but matches your old UX)
-                if (!enabled)
-                {
-                    if (auto* p = apvts.getParameter("route" + juce::String(i) + "_oneshot"))
-                    {
-                        p->beginChangeGesture();
-                        p->setValueNotifyingHost(0.0f);
-                        p->endChangeGesture();
-                    }
-                }
+                // // If disabling the route, force OneShot param OFF (optional but matches your old UX)
+                // if (!enabled)
+                // {
+                //     if (auto* p = apvts.getParameter("route" + juce::String(i) + "_oneshot"))
+                //     {
+                //         p->beginChangeGesture();
+                //         p->setValueNotifyingHost(0.0f);
+                //         p->endChangeGesture();
+                //     }
+                // }
 
                 // Only show oneshot if route enabled AND noteRestart is enabled
                 const bool noteRestartOn = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
@@ -602,13 +602,6 @@ public:
                                                 .withMargin({ 0, 8, 0, 0 }));
 
         syncModeOptions.performLayout(syncModeRow);
-        /////////////////////////
-
-        // BPM label pair
-        // auto bpmRow = lfoAreaContent.removeFromTop(rowHeight);
-        // bpmLabelTitle.setBounds(bpmRow.removeFromLeft(labelWidth));
-        // bpmRow.removeFromLeft(spacing);
-        // bpmLabel.setBounds(bpmRow);
 
         lfoAreaContent.removeFromTop(6);
 
@@ -1072,6 +1065,8 @@ private:
             {
                 auto* bipolar = routeBipolarToggles[i].get();
                 auto* invert  = routeInvertToggles[i].get();
+                auto* oneShot  = routeOneShotToggles[i].get();
+
 
                 if (isRandom)
                 {
@@ -1082,6 +1077,10 @@ private:
                     invert->setToggleState(false, juce::sendNotification);
                     invert->setEnabled(false);
                     invert->setAlpha(0.8f);
+
+                    oneShot->setToggleState(false, juce::sendNotification);
+                    oneShot->setEnabled(false);
+                    oneShot->setAlpha(0.8f);
                 }
                 else
                 {
@@ -1090,6 +1089,9 @@ private:
 
                     invert->setEnabled(true);
                     invert->setAlpha(1.0f);
+
+                    oneShot->setEnabled(true);
+                    oneShot->setAlpha(1.0f);
                 }
             }
         }

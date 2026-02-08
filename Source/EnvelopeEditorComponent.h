@@ -69,6 +69,31 @@ public:
         //apvts
         egDestAttach = std::make_unique<ChoiceAttachment>(apvts, "egDestParamIndex", destinationBox);
 
+        
+
+        destinationBox.onChange = [this]()
+        {
+            // egDestParamIndex is a Choice param => selectedIndex 0..N-1
+            const int sel = destinationBox.getSelectedItemIndex();
+
+            // Count how many EG destinations exist (must match the first part of the list)
+            int egDestCount = 0;
+            for (int i = 0; i < juce::numElementsInArray(syntaktParameters); ++i)
+                if (syntaktParameters[i].egDestination)
+                    ++egDestCount;
+
+            const bool isEgToLfo = (sel >= egDestCount);
+
+            // If routing to LFO, “EG Out Channel” is irrelevant
+            midiChannelBox.setEnabled(!isEgToLfo);
+            midiChannelLabel.setEnabled(!isEgToLfo);
+
+            // change label text
+            destinationLabel.setText(isEgToLfo ? "Dest. (internal)" : "Dest. CC", juce::dontSendNotification);
+        };
+
+        destinationBox.onChange();
+
         // ---- Sliders 
         // ---- apvts
         attackAttach  = std::make_unique<SliderAttachment>(apvts, "egAttackSec",  attackSlider);
@@ -195,27 +220,6 @@ public:
         releaseLogLabel.setJustificationType (juce::Justification::centredLeft);
         releaseLogLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible(releaseLogLabel);
-
-        // EG -> LFO cross-mod toggles
-        for (int r = 0; r < maxRoutes; ++r)
-        {
-            const auto rs = juce::String(r);
-
-            egToLfoToggles[r] = std::make_unique<LedToggleButton>(
-                "EG->LFO " + juce::String(r + 1),
-                SetupUI::LedColour::Orange
-            );
-
-            addAndMakeVisible(*egToLfoToggles[r]);
-            egToLfoToggles[r]->setButtonText("");
-
-            egToLfoLabels[r].setText("EG to LFO route " + juce::String(r + 1), juce::dontSendNotification);
-            egToLfoLabels[r].setJustificationType(juce::Justification::centredLeft);
-            egToLfoLabels[r].setColour(juce::Label::textColourId, SetupUI::labelsColor);
-            addAndMakeVisible(egToLfoLabels[r]);
-
-            egToLfoAttach[r] = std::make_unique<ButtonAttachment>(apvts, "egToLfoRoute" + rs, *egToLfoToggles[r]);
-        }
 
         // Keep LED states in sync with automation/preset changes
         startTimerHz(20);
@@ -420,34 +424,6 @@ public:
         placeRow(midiChannelLabel, midiChannelBox);  
         placeRow(destinationLabel, destinationBox);
 
-        content.removeFromTop(30);
-
-        // EG -> LFO cross-mod rows
-        for (int r = 0; r < maxRoutes; ++r)
-        {
-            auto egToLfoRoute = content.removeFromTop(rowHeight + 4);
-
-            juce::FlexBox egToLfoRouteFlex;
-            egToLfoRouteFlex.flexDirection = juce::FlexBox::Direction::row;
-            egToLfoRouteFlex.alignItems    = juce::FlexBox::AlignItems::flexStart;
-            egToLfoRouteFlex.justifyContent= juce::FlexBox::JustifyContent::flexStart;
-
-            egToLfoRouteFlex.items.add(juce::FlexItem(*egToLfoToggles[r])
-                                                .withWidth(22)
-                                                .withHeight(rowHeight)
-                                                .withMargin({ 0, 4, 0, 0 }));
-            egToLfoRouteFlex.items.add(juce::FlexItem(egToLfoLabels[r])
-                                                .withWidth(100)
-                                                .withHeight(rowHeight)
-                                                .withMargin({ 0, 8, 0, 0 }));
-
-            egToLfoRouteFlex.performLayout(egToLfoRoute);
-
-        }
-        //    placeRow(egToLfoLabels[r], *egToLfoToggles[r]);
-
-        
-
     }
 
 private:
@@ -566,15 +542,23 @@ private:
     void populateEgDestinationBox()
     {
         destinationBox.clear();
-        
-        // Change .size() to numElementsInArray
+
+        int itemId = 1;
+
+        // 1) Regular EG destinations (must match APVTS StringArray order!)
         for (int globalIdx = 0; globalIdx < juce::numElementsInArray(syntaktParameters); ++globalIdx)
         {
             if (syntaktParameters[globalIdx].egDestination)
-            {
-                destinationBox.addItem(syntaktParameters[globalIdx].name, globalIdx + 1);
-            }
+                destinationBox.addItem(syntaktParameters[globalIdx].name, itemId++);
         }
+
+        // Optional separator (JUCE supports section headings / separators via addSectionHeading)
+        destinationBox.addSeparator();
+
+        // 2) “Merged” EG → LFO route options (single-select)
+        destinationBox.addItem("EG to LFO Route 1", itemId++);
+        destinationBox.addItem("EG to LFO Route 2", itemId++);
+        destinationBox.addItem("EG to LFO Route 3", itemId++);
     }
 
     void setupAttackSlider()
@@ -754,11 +738,6 @@ private:
 
     // --- EG -> LFO cross-mod UI ---
     static constexpr int maxRoutes = 3;
-
-    std::array<std::unique_ptr<LedToggleButton>, maxRoutes> egToLfoToggles;
-    std::array<juce::Label, maxRoutes>                      egToLfoLabels;
-    std::array<std::unique_ptr<ButtonAttachment>, maxRoutes> egToLfoAttach;
-
 
     // look & feel from your Cosmetic.h
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };

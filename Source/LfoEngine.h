@@ -265,8 +265,6 @@ namespace modztakt::lfo
             }
 
             // Detect changes (so we can reset runtime-only flags safely)
-            // remove
-            //const RouteSnapshot now { midiChannel, paramIdx, bipolar, invert, oneShot };
             const RouteSnapshot now { effectiveChannel, paramIdx, bipolar, invert, oneShot };
 
             const auto& prev = lastRouteSnapshot[i];

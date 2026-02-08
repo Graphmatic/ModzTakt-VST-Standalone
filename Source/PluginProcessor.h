@@ -130,14 +130,27 @@ public:
         if (!startOnPlayToggleState)
             lfoForcedActiveByPlay = false;
 
-        // Detect user toggling OFF (explicit stop) and clear forced-run
+        // Detect user toggling OFF (explicit stop) and clear forced-run (Option A master kill)
         if (lastLfoActiveParam && !lfoActiveParam)
         {
             lfoForcedActiveByNote = false;
             lfoForcedActiveByPlay = false;
+
+            lfoForcedActiveByEg = false;
+            lfoForcedEgRouteIndex = -1;
+
             lfoRuntimeMuted = false;
+
+            // Also clear EG gate/ramp state so we don't "finish" after a hard stop
+            for (int i = 0; i < maxRoutes; ++i)
+            {
+                egGateWasOpen[i] = false;
+                neutralRampActive[i] = false;
+                neutralRampPos[i] = 0;
+            }
         }
         lastLfoActiveParam = lfoActiveParam;
+
 
         const double rateSliderValueHz = apvts.getRawParameterValue("lfoRateHz")->load();
         const double depthSliderValue  = apvts.getRawParameterValue("lfoDepth")->load();
@@ -206,6 +219,13 @@ public:
         egParams.releaseCurveMode = (modztakt::eg::CurveShape) (int) apvts.getRawParameterValue("egReleaseCurve")->load();
 
         egEngine.setParams(egParams);
+
+        const int egDestChoice = (int) apvts.getRawParameterValue("egDestParamIndex")->load();
+        
+        const int egMidiDestCount = SyntaktParameterEgIndex.size(); // number of real EG destinations
+
+        const bool egToLfoMode = (egDestChoice >= egMidiDestCount);
+        const int egToLfoRouteIndex = egToLfoMode ? (egDestChoice - egMidiDestCount) : -1; // 0..2
 
         // scope view
         bool scopeOn = apvts.getRawParameterValue("scope")->load() > 0.5f;
@@ -280,10 +300,13 @@ public:
                 }
         }
 
-        // Apply LFO Active state (resets phases)
         const bool transportOk = (!syncEnabled) || transportRunning.load(std::memory_order_acquire);
-        const bool wantsLfo = lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay;
-        const bool shouldRunLfo = wantsLfo && transportOk;
+
+        // EG-forced run ignores transport gate
+        const bool wantsLfo =
+            lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
+
+        const bool shouldRunLfo = wantsLfo && (transportOk || lfoForcedActiveByEg);
 
         modztakt::lfo::applyLfoActiveState (shouldRunLfo,
                                    shape,
@@ -308,17 +331,21 @@ public:
             {
                 const bool matchesSource = (noteSourceChannel <= 0) ? true : (ch == noteSourceChannel);
 
-                if (matchesSource)
+                // If EG->LFO protected run is active, ignore noteRestart unless this note-on
+                // is from the EG note source channel (so EG + its LFO route can retrigger together).
+                const bool allowRestartNow =
+                    !lfoForcedActiveByEg || (ch == egSourceChannel);
+
+                if (matchesSource && allowRestartNow)
                 {
                     if (!lfoActiveParam)
                         uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
 
                     lfoForcedActiveByNote = true;
-                    requestLfoRestart.store (true, std::memory_order_release);
+                    requestLfoRestart.store(true, std::memory_order_release);
+
                     for (int i = 0; i < maxRoutes; ++i)
-                    {
                         lfoRoutes[i].totalPhaseAdvanced = 0.0;
-                    }
                 }
             }
         }
@@ -334,16 +361,27 @@ public:
         }
 
         // 3) Stop LFO on Note-Off (requested by callback logic)
+        // If EG->LFO is currently forcing a protected run, ignore note-off stop for the duration.
         if (pending.requestLfoStop.exchange(false, std::memory_order_acq_rel))
         {
-            lfoRuntimeMuted = true;
-            lfoForcedActiveByNote = false;   // <--- NEW (so it truly stops)
-
-            for (int i = 0; i < maxRoutes; ++i)
+            if (!lfoForcedActiveByEg)
             {
-                lfoRoutes[i].totalPhaseAdvanced = 0.0;
-                lfoRoutes[i].hasFinishedOneShot = true;
-                lfoRoutes[i].passedPeak = true;
+                lfoRuntimeMuted = true;
+                lfoForcedActiveByNote = false;
+
+                for (int i = 0; i < maxRoutes; ++i)
+                {
+                    lfoRoutes[i].totalPhaseAdvanced = 0.0;
+                    lfoRoutes[i].hasFinishedOneShot = true;
+                    lfoRoutes[i].passedPeak = true;
+                }
+            }
+            else
+            {
+                // cancel note-forcing, but keep EG-protected route alive
+                lfoForcedActiveByNote = false;
+                lfoRuntimeMuted = false;
+                // (do not touch oneshot flags; EG-protected route should finish naturally)
             }
         }
 
@@ -378,12 +416,35 @@ public:
         {
             egHasValue = egEngine.processBlock(audio.getNumSamples(), eg01);
             eg01 = juce::jlimit(0.0, 1.0, eg01);
+            // ------------------------------------------------------------
+            // EG->LFO protected-run: while EG is active and destination is EG->LFO Route X,
+            // force LFO engine to run even if transport stops / noteOffStop happens.
+            // ------------------------------------------------------------
+            if (egToLfoMode && egToLfoRouteIndex >= 0 && egToLfoRouteIndex < maxRoutes)
+            {
+                if (egHasValue)
+                {
+                    lfoForcedActiveByEg = true;
+                    lfoForcedEgRouteIndex = egToLfoRouteIndex;
+
+                    // Make sure we are not muted while EG is forcing
+                    lfoRuntimeMuted = false;
+                }
+                else
+                {
+                    // Do NOT clear here: we clear only after the neutral ramp finishes (see 6C below)
+                    // so the route can "fade to neutral" after EG ends.
+                }
+            }
+            else
+            {
+                // Not routing to LFO anymore: clear forcing immediately
+                lfoForcedActiveByEg = false;
+                lfoForcedEgRouteIndex = -1;
+            }
         }
 
-
-        // ------------------------------------------------------------
         // LFO generation + send (writes into `midi`)  -- SINGLE SEND PATH
-        // ------------------------------------------------------------
         if (lfoActive && !lfoRuntimeMuted)
         {
             // sampleRate in plugin is per-sample
@@ -435,8 +496,18 @@ public:
                     // ------------------------------------------------------------
                     bool shouldSend = true;
 
-                    const bool egToThisRoute =
-                        apvts.getRawParameterValue("egToLfoRoute" + juce::String(i))->load() > 0.5f;
+                    //const bool egToThisRoute = apvts.getRawParameterValue("egToLfoRoute" + juce::String(i))->load() > 0.5f;
+                    const bool egToThisRoute = (egToLfoRouteIndex == i);
+                    
+                    // If LFO isn't user-enabled and isn't forced by note/play, then during EG-forced run
+                    // only the targeted route is allowed to emit MIDI.
+                    const bool anyUserOrOtherForce = lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay;
+
+                    if (!anyUserOrOtherForce && lfoForcedActiveByEg)
+                    {
+                        if (i != lfoForcedEgRouteIndex)
+                            continue;
+                    }
 
                     if (egToThisRoute)
                     {
@@ -568,6 +639,33 @@ public:
         }
 
         // ------------------------------------------------------------
+        // Release EG-forced run only after EG ended AND neutral ramp finished.
+        // ------------------------------------------------------------
+        if (lfoForcedActiveByEg && !egHasValue)
+        {
+            const int r = lfoForcedEgRouteIndex;
+
+            const bool routeValid = (r >= 0 && r < maxRoutes);
+
+            if (!routeValid)
+            {
+                lfoForcedActiveByEg = false;
+                lfoForcedEgRouteIndex = -1;
+            }
+            else
+            {
+                const bool rampDone = !neutralRampActive[r] && !egGateWasOpen[r];
+
+                if (rampDone)
+                {
+                    lfoForcedActiveByEg = false;
+                    lfoForcedEgRouteIndex = -1;
+                }
+            }
+        }
+
+
+        // ------------------------------------------------------------
         // 6) EG send (re-use eg01 computed earlier in the block)
         // ------------------------------------------------------------
         if (egHasValue)
@@ -578,18 +676,24 @@ public:
            #endif
 
             const int outCh    = (int) apvts.getRawParameterValue("egOutChannel")->load();
-            const int destIdx  = (int) apvts.getRawParameterValue("egDestParamIndex")->load();
-            const int paramIdx = SyntaktParameterEgIndex[destIdx];
-            const int egValue  = mapEgToMidi(eg01, paramIdx);
 
-            const auto& param = syntaktParameters[paramIdx];
+            
 
-            sendThrottledParamValueToBuffer(midi,
-                                            0x7FFF,
-                                            outCh,
-                                            param,
-                                            egValue,
-                                            0);
+            if (!egToLfoMode) // send to MIDI output
+            {
+                const int paramIdx = SyntaktParameterEgIndex[egDestChoice];
+                const int egValue  = mapEgToMidi(eg01, paramIdx);
+
+                const auto& param = syntaktParameters[paramIdx];
+
+                sendThrottledParamValueToBuffer(midi,
+                                                0x7FFF,
+                                                outCh,
+                                                param,
+                                                egValue,
+                                                0);
+            }
+            
         }
 
         // Advance global time after processing the block
@@ -710,6 +814,11 @@ private:
     std::atomic<bool> startOnPlay { false };
     bool lfoForcedActiveByPlay = false;
 
+    // EG -> LFO "protected run" (Option A: only UI Start/Stop can kill)
+    bool lfoForcedActiveByEg = false;      // audio thread only
+    int  lfoForcedEgRouteIndex = -1;       // 0..maxRoutes-1, audio thread only
+
+
     std::atomic<double> bpmForUi { 0.0 };
     std::atomic<bool>   hostTransportRunning { false };
 
@@ -784,6 +893,10 @@ private:
             if (syntaktParameters[i].egDestination)
                 filteredEgDest.add(syntaktParameters[i].name);
         }
+        filteredEgDest.add("EG to LFO Route 1");
+        filteredEgDest.add("EG to LFO Route 2");
+        filteredEgDest.add("EG to LFO Route 3");
+
         return filteredEgDest;
     }();
     
@@ -839,7 +952,7 @@ private:
 
         // Note restart feature
         p.push_back (std::make_unique<juce::AudioParameterBool>("noteRestart", "Note Restart", false));
-        p.push_back (std::make_unique<juce::AudioParameterInt>("noteSourceChannel", "Note Restart Channel", 0, 16, 0));
+        p.push_back (std::make_unique<juce::AudioParameterInt>("noteSourceChannel", "Note Restart Channel", 1, 16, 1));
         p.push_back (std::make_unique<juce::AudioParameterBool>("noteOffStop", "Stop on Note Off", false));
 
         // Scope view
@@ -973,16 +1086,16 @@ private:
 
         // EG -> LFO cross-mod routing
         // Per LFO route: if enabled, EG scales LFO depth (dynamic depth)
-        for (int r = 0; r < maxRoutes; ++r)
-        {
-            const auto rs = juce::String(r);
+        // for (int r = 0; r < maxRoutes; ++r)
+        // {
+        //     const auto rs = juce::String(r);
 
-            p.push_back (std::make_unique<juce::AudioParameterBool>(
-                "egToLfoRoute" + rs,
-                "EG -> LFO Route " + rs,
-                false
-            ));
-        }
+        //     p.push_back (std::make_unique<juce::AudioParameterBool>(
+        //         "egToLfoRoute" + rs,
+        //         "EG -> LFO Route " + rs,
+        //         false
+        //     ));
+        // }
 
         // SETTINGS MENU PARAMETERS (Performance)
         // MIDI Data Throttle (change threshold in steps)
@@ -1103,11 +1216,28 @@ private:
 
         if (gotStop)
         {
-            lfoRuntimeMuted = true;
-            lfoForcedActiveByNote = false;
-            lfoForcedActiveByPlay = false;
+            // HARD STOP (but EG->LFO protected run must finish its cycle)
+            if (!lfoForcedActiveByEg)
+            {
+                lfoRuntimeMuted = true;
+                lfoForcedActiveByNote = false;
+                lfoForcedActiveByPlay = false;
 
-            uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+                // Update UI param to OFF
+                uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+            }
+            else
+            {
+                // Transport stop cancels play/note forcing, but EG-forced run continues.
+                lfoForcedActiveByNote = false;
+                lfoForcedActiveByPlay = false;
+
+                // keep producing LFO for the EG-forced route
+                lfoRuntimeMuted = false;
+
+                // IMPORTANT: do NOT force the UI LFO button OFF here,
+                // because the user didn't press it (Option A master kill remains UI only).
+            }
         }
         else if (gotStart)
         {
