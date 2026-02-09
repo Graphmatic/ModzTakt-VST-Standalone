@@ -226,6 +226,9 @@ public:
         
         // Initialize release slider outline based on current releaseLong state
         updateReleaseSliderOutline();
+
+        // Refresh EG dest. param list to avoid conflict with LFO dest. parameters
+        refreshEgDestConflicts();
     }
 
     ~EnvelopeEditorComponent() override
@@ -433,6 +436,9 @@ private:
         syncChoiceButtons("egDecayCurve",  decayLinear.get(), decayExpo.get(), decayLog.get());
         syncChoiceButtons("egReleaseCurve", releaseLinear.get(), releaseExpo.get(), releaseLog.get());
 
+        // prevent conflict between LFO and EG dest.param
+        refreshEgDestConflicts();
+
         // Update attack slider look based on long mode
         const int idxAttack = (int) apvts.getRawParameterValue("egAttackMode")->load();
 
@@ -561,6 +567,90 @@ private:
         destinationBox.addItem("EG to LFO Route 3", itemId++);
     }
 
+    // helpers used to prevent conflicts between LFO and EG dest. param
+    int getEgMidiDestCount() const
+    {
+        int count = 0;
+        for (int i = 0; i < juce::numElementsInArray(syntaktParameters); ++i)
+            if (syntaktParameters[i].egDestination)
+                ++count;
+        return count;
+    }
+
+    // Map an EG destination choice index (0..egMidiDestCount-1) to global syntakt param index.
+    // Returns -1 if out of range.
+    int mapEgChoiceToGlobalParamIndex(int egChoiceIndex) const
+    {
+        int k = 0;
+        for (int globalIdx = 0; globalIdx < juce::numElementsInArray(syntaktParameters); ++globalIdx)
+        {
+            if (!syntaktParameters[globalIdx].egDestination)
+                continue;
+
+            if (k == egChoiceIndex)
+                return globalIdx;
+
+            ++k;
+        }
+        return -1;
+    }
+
+    void refreshEgDestConflicts()
+    {
+        // Only apply to the "real EG MIDI destinations" part of the list.
+        const int egMidiDestCount = getEgMidiDestCount();
+
+        // If EG is routed to LFO (choice >= egMidiDestCount) we don't care about conflicts.
+        const int egOutCh = (int) apvts.getRawParameterValue("egOutChannel")->load(); // 0..16 (0 means "off" in your UI)
+
+        // If channel is disabled/0, don't disable anything.
+        if (egOutCh <= 0)
+        {
+            for (int itemId = 1; itemId <= egMidiDestCount; ++itemId)
+                destinationBox.setItemEnabled(itemId, true);
+            return;
+        }
+
+        // Disable items that are already taken by an LFO route on same channel.
+        for (int egChoice = 0; egChoice < egMidiDestCount; ++egChoice)
+        {
+            const int globalParamIdx = mapEgChoiceToGlobalParamIndex(egChoice);
+
+            bool conflict = false;
+            if (globalParamIdx >= 0)
+            {
+                // Compare against all LFO routes in APVTS
+                for (int r = 0; r < maxRoutes; ++r)
+                {
+                    const auto rs = juce::String(r);
+
+                    const int lfoChChoice0 =
+                        (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16
+
+                    const int lfoCh = (lfoChChoice0 == 0) ? 0 : lfoChChoice0;
+
+                    const int lfoParam =
+                        (int) apvts.getRawParameterValue("route" + rs + "_param")->load(); // 0..N-1 global
+
+                    if (lfoCh == egOutCh && lfoParam == globalParamIdx)
+                    {
+                        conflict = true;
+                        break;
+                    }
+                }
+            }
+
+            destinationBox.setItemEnabled(egChoice + 1, !conflict); // itemId = choice+1
+        }
+
+        // Keep the currently selected item enabled so the UI doesn't "lock up"
+        // if automation set it already.
+        const int selectedItemId = destinationBox.getSelectedId();
+        if (selectedItemId >= 1 && selectedItemId <= egMidiDestCount)
+            destinationBox.setItemEnabled(selectedItemId, true);
+    }
+
+    // AHDSR Sliders setup
     void setupAttackSlider()
     {
         addAndMakeVisible(attackSlider);
@@ -736,7 +826,6 @@ private:
     std::unique_ptr<ButtonAttachment> releaseLongAttach;
     juce::Label releaseLinearLabel, releaseExpoLabel, releaseLogLabel, releaseLongLabel;
 
-    // --- EG -> LFO cross-mod UI ---
     static constexpr int maxRoutes = 3;
 
     // look & feel from your Cosmetic.h

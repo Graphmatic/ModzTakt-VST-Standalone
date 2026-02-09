@@ -342,17 +342,6 @@ public:
                 routeBipolarToggles[i]->setVisible(enabled);
                 routeInvertToggles[i]->setVisible(enabled);
 
-                // // If disabling the route, force OneShot param OFF (optional but matches your old UX)
-                // if (!enabled)
-                // {
-                //     if (auto* p = apvts.getParameter("route" + juce::String(i) + "_oneshot"))
-                //     {
-                //         p->beginChangeGesture();
-                //         p->setValueNotifyingHost(0.0f);
-                //         p->endChangeGesture();
-                //     }
-                // }
-
                 // Only show oneshot if route enabled AND noteRestart is enabled
                 const bool noteRestartOn = apvts.getRawParameterValue("noteRestart")->load() > 0.5f;
                 routeOneShotToggles[i]->setVisible(enabled && noteRestartOn);

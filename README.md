@@ -10,6 +10,10 @@ A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or othe
 
 - the Oscilloscope view is a gadget, not accurate at high LFO rates
 
+- LFO Start/Stop UI button may not reflect LFO running state if EG is set to modulate an LFO route ( EG set to "EG to LFO route_x ): LFO route triggered by EG always run until end of EG cycle.
+
+- conflicting modulation pathes may still be possible, I hunt them all unless they sound like a new feature.
+
 Mostly "vibe-coded" with ChatGPT and Claude.ai
 
 
