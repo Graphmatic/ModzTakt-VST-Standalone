@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="uOuBID" name="ModzTakt_plugin" projectType="audioplug" useAppConfig="0"
+<JUCERPROJECT id="uOuBID" name="ModzTakt" projectType="audioplug" useAppConfig="0"
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" companyEmail="makethembusy@proton.me"
               bundleIdentifier="com.zaoum.modztakt" defines="JUCE_ALSA=1&#10;JUCE_ALSA_MIDI=1&#10;JUCE_JACK=0&#10;"
               pluginFormats="buildStandalone,buildVST3" pluginCharacteristicsValue="pluginIsMidiEffectPlugin,pluginProducesMidiOut,pluginWantsMidiIn"
-              pluginVST3Category="Fx" companyWebsite="makethembusy">
-  <MAINGROUP id="TYoiW9" name="ModzTakt_plugin">
+              pluginVST3Category="Fx" companyWebsite="makethembusy" companyName="Sound &amp; Breakfast"
+              companyCopyright="free" version="0.0001">
+  <MAINGROUP id="TYoiW9" name="ModzTakt">
     <GROUP id="{2B64A09A-E9B6-0936-1CA3-4333E5C25275}" name="Source">
       <GROUP id="{15BC47E3-A028-7859-6148-068B7D289598}" name="Resources">
         <FILE id="E6cyC1" name="checkbox_off.svg" compile="0" resource="1"
