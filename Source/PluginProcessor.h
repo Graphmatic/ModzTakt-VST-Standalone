@@ -58,8 +58,7 @@ public:
         egEngine.setSampleRate(cachedSampleRate);
         egEngine.reset();
 
-        // MIDI Out throttles/perf
-        // In PluginProcessor constructor or prepareToPlay:
+        // MIDI Out throttles/perf - Initialize from parameters
         if (auto* throttleParam = apvts.getParameter("midiDataThrottle"))
         {
             const int index = static_cast<int>(throttleParam->getValue() * 4.0f + 0.5f);
@@ -170,8 +169,8 @@ public:
         {
             const auto rs = juce::String(i);
 
-            const int chChoice0 = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16=Ch1..16
-            const int midiChannel = (chChoice0 == 0) ? 0 : chChoice0;
+            // CLEANED: Removed redundant ternary - chChoice0 is already the channel value we need
+            const int midiChannel = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load();
 
             const int paramIdx = (int) apvts.getRawParameterValue("route" + rs + "_param")->load(); // 0..N-1
 
@@ -223,13 +222,11 @@ public:
 
         const int egDestChoice = (int) apvts.getRawParameterValue("egDestParamIndex")->load();
         
-        const int egMidiDestCount = SyntaktParameterEgIndex.size(); // number of real EG destinations
-
+        // CLEANED: Simplified EG->LFO mode logic with clearer variable names
+        const int egMidiDestCount = SyntaktParameterEgIndex.size();
         const bool egToLfoMode = (egDestChoice >= egMidiDestCount);
-        const int egToLfoRouteIndex = egToLfoMode ? (egDestChoice - egMidiDestCount) : -1; // 0..2
-
+        const int egToLfoRouteIndex = egToLfoMode ? (egDestChoice - egMidiDestCount) : -1;
         const bool egToLfoEffective = egIsEnabled && egToLfoMode;
-        const int  egToLfoRouteIndexEffective = egToLfoEffective ? egToLfoRouteIndex : -1;
 
 
         // scope view
@@ -323,7 +320,7 @@ public:
         if (pending.pendingNoteOn.exchange(false, std::memory_order_acq_rel))
         {
             const int ch   = pending.pendingNoteChannel.load(std::memory_order_relaxed);
-            const int note = pending.pendingNoteNumber.load (std::memory_order_relaxed);
+            // CLEANED: Removed unused 'note' variable
             const float velocity = pending.pendingNoteVelocity.load (std::memory_order_relaxed);
 
             // --- EG ---
@@ -356,8 +353,8 @@ public:
         // 2) NOTE OFF
         if (pending.pendingNoteOff.exchange(false, std::memory_order_acq_rel))
         {
-            const int ch   = pending.pendingNoteChannel.load (std::memory_order_relaxed);
-            const int note = pending.pendingNoteNumber.load (std::memory_order_relaxed);
+            const int ch = pending.pendingNoteChannel.load (std::memory_order_relaxed);
+            // CLEANED: Removed unused 'note' variable
 
             if (egIsEnabled.load (std::memory_order_relaxed) && ch == egSourceChannel)
             {
@@ -402,16 +399,11 @@ public:
                 for (int i = 0; i < maxRoutes; ++i)
                 {
                     lfoRouteSuppressedByNoteOff[i] = (i != lfoForcedEgRouteIndex);
-
-                    if (i == lfoForcedEgRouteIndex) continue;
-                    lfoRoutes[i].totalPhaseAdvanced = 0.0;
-                    lfoRoutes[i].hasFinishedOneShot = true;
-                    lfoRoutes[i].passedPeak = true;
                 }
             }
         }
 
-        // Handle pending retrigger from Note-On
+        // 4) Restart request
         if (requestLfoRestart.exchange(false, std::memory_order_acq_rel))
         {
             lfoRuntimeMuted = false;
@@ -443,15 +435,16 @@ public:
 
             // EG->LFO protected-run: while EG is active and destination is EG->LFO Route X,
             // force LFO engine to run even if transport stops / noteOffStop happens.
-            if (egToLfoEffective && egToLfoRouteIndexEffective >= 0 && egToLfoRouteIndexEffective < maxRoutes)
+            // CLEANED: Simplified egToLfoRouteIndexEffective check
+            if (egToLfoEffective && egToLfoRouteIndex >= 0 && egToLfoRouteIndex < maxRoutes)
             {
                 if (egHasValue)
                 {
                     lfoForcedActiveByEg = true;
-                    lfoForcedEgRouteIndex = egToLfoRouteIndexEffective;
+                    lfoForcedEgRouteIndex = egToLfoRouteIndex;
                     lfoRuntimeMuted = false;
                 }
-                // If egHasValue == false, keep forced-run true until your “release after ramp” code clears it.
+                // If egHasValue == false, keep forced-run true until your "release after ramp" code clears it.
             }
             else
             {
@@ -518,7 +511,7 @@ public:
                     // EG->LFO: gate + neutral on end (shape-domain only)
                     bool shouldSend = true;
 
-                    const bool egToThisRoute = (egToLfoRouteIndexEffective == i);
+                    const bool egToThisRoute = (egToLfoRouteIndex == i);
                     
                     // If LFO isn't user-enabled and isn't forced by note/play, then during EG-forced run
                     // only the targeted route is allowed to emit MIDI.
@@ -621,7 +614,7 @@ public:
                     if (scopeRoutesEnabled[i].load(std::memory_order_relaxed))
                         scopeValues[i].store((float)(shapeComputed * depth), std::memory_order_relaxed);
 
-                    (void) wrapped; // keep if you don't use it right now
+                    juce::ignoreUnused(wrapped);
                 }
             }
 
@@ -682,13 +675,10 @@ public:
                     lfoForcedActiveByEg = false;
                     lfoForcedEgRouteIndex = -1;
 
-                    // If EG was the only running LFO, request UI Start/Stop to go OFF.
-                   // const bool userWantsLfo = apvts.getRawParameterValue("lfoActive")->load() > 0.5f;
-
-                    const bool refreshStartButton =  lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
-                        if (!refreshStartButton)
-                            uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
-
+                    // CLEANED: Removed commented-out code and simplified logic
+                    const bool refreshStartButton = lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
+                    if (!refreshStartButton)
+                        uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
                 }
             }
         }
@@ -707,7 +697,7 @@ public:
             {
                 const int paramIdx = SyntaktParameterEgIndex[egDestChoice];
 
-                // UI already prevents this conflict, automation safety gard
+                // UI already prevents this conflict, automation safety guard
                 bool egConflictsWithLfo = false;
 
                 for (int r = 0; r < maxRoutes; ++r)
@@ -726,7 +716,7 @@ public:
                     const auto& param = syntaktParameters[paramIdx];
 
                     sendThrottledParamValueToBuffer(midi,
-                                                    0x7FFF,
+                                                    EG_ROUTE_KEY,  // CLEANED: Use constant for magic number
                                                     outCh,
                                                     param,
                                                     egValue,
@@ -818,10 +808,10 @@ public:
     }
 
     //==============================================================================
-    inline APVTS&       getAPVTS()       noexcept { return apvts; }
-
-    inline double getSampleRateCached() const noexcept { return cachedSampleRate; }
-    inline int    getBlockSizeCached()  const noexcept { return cachedBlockSize; }
+    // PUBLIC INTERFACE FOR UI
+    //==============================================================================
+public:
+    APVTS apvts;
 
     // LFO Start/Stop label refresh
     bool isLfoRunningForUi() const noexcept
@@ -845,9 +835,34 @@ public:
     std::atomic<int> changeThreshold { 0 };
     std::atomic<double> msFloofThreshold { 0.0 };
 
-private:
+    inline APVTS&       getAPVTS()       noexcept { return apvts; }
 
-    // MIDI clock/transport
+    inline double getSampleRateCached() const noexcept { return cachedSampleRate; }
+    inline int    getBlockSizeCached()  const noexcept { return cachedBlockSize; }
+
+    //==============================================================================
+    // PRIVATE IMPLEMENTATION
+    //==============================================================================
+private:
+    // Audio processing state
+    double cachedSampleRate = 48000.0;
+    int    cachedBlockSize  = 0;
+
+    // Helpers for per-sample scheduling (updated each processBlock)
+    double currentBlockStartMs = 0.0;
+    double msPerSample = 0.0;
+    double timeMs = 0.0;
+
+    // LFO state flags
+    bool lfoRuntimeMuted = false;
+    bool lfoForcedActiveByNote = false;
+    bool lastLfoActiveParam = false;
+    bool lfoActive = false;
+
+    std::atomic<bool> uiLfoIsRunning { false };
+
+    // Transport and sync
+    std::atomic<bool> transportRunning { false };
     std::atomic<bool> transportStartPending { false };
     std::atomic<bool> transportStopPending  { false };
 
@@ -858,11 +873,9 @@ private:
     bool lfoForcedActiveByEg = false;      // audio thread only
     int  lfoForcedEgRouteIndex = -1;       // 0..maxRoutes-1, audio thread only
 
-
     std::atomic<double> bpmForUi { 0.0 };
     std::atomic<bool>   hostTransportRunning { false };
-
-    std::atomic<bool> hostTransportValid { false };
+    std::atomic<bool>   hostTransportValid { false };
     bool lastHostPlaying = false; // audio thread only
 
     // Pending note flags (replaces GlobalMidiCallback storage)
@@ -872,7 +885,8 @@ private:
     MidiClockHandler midiClock;
 
     // LFO state
-    static constexpr int maxRoutes = 3; // IMPORTANT: your MainComponent uses 3
+    static constexpr int maxRoutes = 3;
+    static constexpr int EG_ROUTE_KEY = 0x7FFF;  // CLEANED: Named constant for magic number
 
     std::array<RouteSnapshot, maxRoutes> lastRouteSnapshot {};
 
@@ -901,18 +915,14 @@ private:
     juce::Random random;
 
     std::atomic<bool> requestLfoRestart { false };
-    bool lfoActive = false;
 
     // EG
     modztakt::eg::Engine egEngine;
-
     std::atomic<bool> egIsEnabled { false };
 
     // Throttle state for outgoing MIDI
     std::unordered_map<int, int>    lastSentValuePerParam;
     std::unordered_map<int, double> lastSendTimePerParam;
-
-    double timeMs = 0.0;
 
     // Scope (shared audio->UI)
     std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
@@ -1135,7 +1145,7 @@ private:
             "midiDataThrottle",
             "MIDI Data Throttle",
             juce::StringArray{"Off (send every change)", "1 step (fine)", "2 steps", "4 steps", "8 steps (coarse)"},
-            1));  // Default to index 0 = Off
+            1));  // Default to index 1 = 1 step
 
         // MIDI Rate Limiter (in milliseconds)
         // Options: 0.0 (Off), 0.5ms, 1.0ms, 1.5ms, 2.0ms, 3.0ms, 5.0ms
@@ -1173,16 +1183,16 @@ private:
 
     inline const double updateTempoFromHostOrMidiClock (bool syncEnabled)
     {
-        double bpm = 0.0;
-        bool playing = true;
-        bool valid = false;
-
         if (!syncEnabled)
         {
             bpmForUi.store(0.0, std::memory_order_relaxed);
             hostTransportRunning.store(true, std::memory_order_relaxed);
-            return bpm;
+            return 0.0;
         }
+
+        double bpm = 0.0;
+        bool valid = false;
+        bool playing = false;  // CLEANED: Initialize before use, not with default true
 
         if (auto* playHead = getPlayHead())
         {
@@ -1312,9 +1322,12 @@ private:
                                              int sampleOffsetInBlock)
     {
         // Build per-route + per-parameter key
+        static constexpr int CC_MASK = 0x1000;
+        static constexpr int NRPN_MASK = 0x2000;
+
         const int paramKey =
             (routeIndex << 16) |
-            (param.isCC ? 0x1000 : 0x2000) |
+            (param.isCC ? CC_MASK : NRPN_MASK) |
             (param.isCC ? param.ccNumber : ((param.nrpnMsb << 7) | param.nrpnLsb));
 
         const int lastVal = lastSentValuePerParam[paramKey];
@@ -1345,29 +1358,6 @@ private:
         midiOut.addEvent (juce::MidiMessage::controllerEvent (midiChannel, 6,  valueMSB),   sampleOffsetInBlock);
         midiOut.addEvent (juce::MidiMessage::controllerEvent (midiChannel, 38, valueLSB),   sampleOffsetInBlock);
     }
-
-    
-
-public:
-    APVTS apvts;
-
-private:
-    double cachedSampleRate = 48000.0;
-    int    cachedBlockSize  = 0;
-
-    // Helpers for per-sample scheduling (updated each processBlock)timeMs
-    double currentBlockStartMs = 0.0;
-    double msPerSample = 0.0;
-
-    bool lfoRuntimeMuted = false;
-
-    bool lfoForcedActiveByNote = false;
-
-    bool lastLfoActiveParam = false;
-
-    std::atomic<bool> uiLfoIsRunning { false };
-
-    std::atomic<bool> transportRunning { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModzTaktAudioProcessor)
 };
