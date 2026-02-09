@@ -432,6 +432,8 @@ public:
 private:
     void timerCallback() override
     {
+        updateEgUiEnabledState();
+
         syncChoiceButtons("egAttackMode",  attackFast.get(), attackLong.get(), attackSnap.get());
         syncChoiceButtons("egDecayCurve",  decayLinear.get(), decayExpo.get(), decayLog.get());
         syncChoiceButtons("egReleaseCurve", releaseLinear.get(), releaseExpo.get(), releaseLog.get());
@@ -512,6 +514,73 @@ private:
         if (a) a->setToggleState(idx == 0, juce::dontSendNotification);
         if (b) b->setToggleState(idx == 1, juce::dontSendNotification);
         if (c) c->setToggleState(idx == 2, juce::dontSendNotification);
+    }
+
+    void updateEgUiEnabledState()
+    {
+        const bool enabled = apvts.getRawParameterValue("egEnabled")->load() > 0.5f;
+
+        // Master stays enabled so you can turn it back on
+        if (egEnable)
+            egEnable->setEnabled(true);
+
+        // Gate the rest
+        noteSourceEgChannelBox.setEnabled(enabled);
+        noteSourceEgChannelLabel.setEnabled(enabled);
+
+        destinationBox.setEnabled(enabled);
+        destinationLabel.setEnabled(enabled);
+
+        midiChannelBox.setEnabled(enabled); // 
+        midiChannelLabel.setEnabled(enabled);
+
+        attackSlider.setEnabled(enabled);
+        holdSlider.setEnabled(enabled);
+        decaySlider.setEnabled(enabled);
+        sustainSlider.setEnabled(enabled);
+        releaseSlider.setEnabled(enabled);
+        velocityAmountSlider.setEnabled(enabled);
+
+        attackFast->setEnabled(enabled);
+        attackLong->setEnabled(enabled);
+        attackSnap->setEnabled(enabled);
+
+        decayLinear->setEnabled(enabled);
+        decayExpo->setEnabled(enabled);
+        decayLog->setEnabled(enabled);
+
+        releaseLinear->setEnabled(enabled);
+        releaseExpo->setEnabled(enabled);
+        releaseLog->setEnabled(enabled);
+
+        releaseLong->setEnabled(enabled);
+
+
+        // Optional: alpha fade to make it obvious
+        const float a = enabled ? 1.0f : 0.45f;
+        noteSourceEgChannelBox.setAlpha(a);
+        destinationBox.setAlpha(a);
+        midiChannelBox.setAlpha(a);
+        attackSlider.setAlpha(a);
+        holdSlider.setAlpha(a);
+        decaySlider.setAlpha(a);
+        sustainSlider.setAlpha(a);
+        releaseSlider.setAlpha(a);
+        velocityAmountSlider.setAlpha(a);
+
+        attackFast->setAlpha(a);
+        attackLong->setAlpha(a);
+        attackSnap->setAlpha(a);
+
+        decayLinear->setAlpha(a);
+        decayExpo->setAlpha(a);
+        decayLog->setAlpha(a);
+
+        releaseLinear->setAlpha(a);
+        releaseExpo->setAlpha(a);
+        releaseLog->setAlpha(a);
+
+        releaseLong->setAlpha(a);
     }
 
     void updateReleaseSliderOutline()
