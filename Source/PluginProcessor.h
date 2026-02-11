@@ -130,14 +130,13 @@ public:
         if (!startOnPlayToggleState)
             lfoForcedActiveByPlay = false;
 
-        // Detect user toggling OFF (explicit stop) and clear forced-run (Option A master kill)
+        // Detect user toggling OFF (explicit stop) and clear forced-run (master LFO kill)
         if (lastLfoActiveParam && !lfoActiveParam)
         {
             lfoForcedActiveByNote = false;
             lfoForcedActiveByPlay = false;
 
             lfoForcedActiveByEg = false;
-            lfoForcedEgRouteIndex = -1;
 
             lfoRuntimeMuted = false;
 
@@ -149,6 +148,7 @@ public:
                 neutralRampPos[i] = 0;
             }
         }
+
         lastLfoActiveParam = lfoActiveParam;
 
 
@@ -205,11 +205,11 @@ public:
         egParams.enabled          = apvts.getRawParameterValue("egEnabled")->load() > 0.5f;
         egIsEnabled.store((bool) egParams.enabled, std::memory_order_release);
 
-        egParams.attackSeconds    = apvts.getRawParameterValue("egAttackSec")->load();
-        egParams.holdSeconds      = apvts.getRawParameterValue("egHoldSec")->load();
-        egParams.decaySeconds     = apvts.getRawParameterValue("egDecaySec")->load();
+        egParams.attackSeconds    = apvts.getRawParameterValue("egAttack")->load();
+        egParams.holdSeconds      = apvts.getRawParameterValue("egHold")->load();
+        egParams.decaySeconds     = apvts.getRawParameterValue("egDecay")->load();
         egParams.sustain01        = apvts.getRawParameterValue("egSustain")->load();
-        egParams.releaseSeconds   = apvts.getRawParameterValue("egReleaseSec")->load();
+        egParams.releaseSeconds   = apvts.getRawParameterValue("egRelease")->load();
         egParams.velocityAmount01 = apvts.getRawParameterValue("egVelAmount")->load();
 
         egParams.attackMode = (modztakt::eg::AttackMode) (int) apvts.getRawParameterValue("egAttackMode")->load();
@@ -220,14 +220,103 @@ public:
 
         egEngine.setParams(egParams);
 
-        const int egDestChoice = (int) apvts.getRawParameterValue("egDestParamIndex")->load();
-        
-        // CLEANED: Simplified EG->LFO mode logic with clearer variable names
-        const int egMidiDestCount = SyntaktParameterEgIndex.size();
-        const bool egToLfoMode = (egDestChoice >= egMidiDestCount);
-        const int egToLfoRouteIndex = egToLfoMode ? (egDestChoice - egMidiDestCount) : -1;
-        const bool egToLfoEffective = egIsEnabled && egToLfoMode;
+        struct EgRouteRuntime
+        {
+            int channel = 0;        // 0=disabled
+            int destChoice = 0;     // APVTS choice index
+            bool toLfo = false;
+            int toLfoRoute = -1;    // 0..2
+        };
 
+        std::array<EgRouteRuntime, maxRoutes> egRoutesRt {};
+
+        const int egMidiDestCount = (int) SyntaktParameterEgIndex.size();
+
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs = juce::String(r);
+
+            const int chChoice = (int) apvts.getRawParameterValue("egRoute" + rs + "_channel")->load(); // 0..16 (Choice index)
+            const int ch = (chChoice == 0 ? 0 : chChoice); // 0=Disabled, else 1..16
+
+            const int destChoice = (int) apvts.getRawParameterValue("egRoute" + rs + "_dest")->load(); // 0..N-1
+
+            const bool toLfo = (destChoice >= egMidiDestCount);
+            const int toLfoRoute = toLfo ? (destChoice - egMidiDestCount) : -1;
+
+            egRoutesRt[r] = { ch, destChoice, toLfo, toLfoRoute };
+        }
+
+        // automation safety: enforce EG route exclusivity deterministically
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            if (!egIsEnabled.load(std::memory_order_relaxed))
+            {
+                egRoutesRt[r].channel = 0;
+                continue;
+            }
+
+            auto& cur = egRoutesRt[r];
+            if (cur.channel == 0) continue;
+
+            if (cur.toLfo)
+            {
+                // internal destination uniqueness
+                for (int j = 0; j < r; ++j)
+                    if (egRoutesRt[j].channel != 0 && egRoutesRt[j].toLfo && egRoutesRt[j].toLfoRoute == cur.toLfoRoute)
+                        cur.channel = 0; // disable later one
+            }
+            else
+            {
+                const int globalParamIdx = SyntaktParameterEgIndex[cur.destChoice];
+
+                // conflict with LFO (same ch + same global param)
+                bool conflictLfo = false;
+                for (int lr = 0; lr < maxRoutes; ++lr)
+                {
+                    if (lfoRoutes[lr].midiChannel == cur.channel && lfoRoutes[lr].parameterIndex == globalParamIdx)
+                    {
+                        conflictLfo = true;
+                        break;
+                    }
+                }
+                if (conflictLfo)
+                {
+                    cur.channel = 0;
+                    continue;
+                }
+
+                // conflict with earlier EG routes (same ch + same global param)
+                for (int j = 0; j < r; ++j)
+                {
+                    const auto& prev = egRoutesRt[j];
+                    if (prev.channel == 0 || prev.toLfo) continue;
+
+                    const int prevGlobalParam = SyntaktParameterEgIndex[prev.destChoice];
+                    if (prev.channel == cur.channel && prevGlobalParam == globalParamIdx)
+                    {
+                        cur.channel = 0;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // --- EG -> LFO routing map (per block, from EG routes selection) ---
+        for (int i = 0; i < maxRoutes; ++i)
+            egToLfoRouteActive[i] = false;
+
+        if (egParams.enabled)
+        {
+            for (int r = 0; r < maxRoutes; ++r)
+            {
+                const auto& er = egRoutesRt[r];
+                if (er.channel == 0) continue; /////////////todo
+
+                if (er.toLfo && er.toLfoRoute >= 0 && er.toLfoRoute < maxRoutes)
+                    egToLfoRouteActive[er.toLfoRoute] = true;
+            }
+        }
 
         // scope view
         bool scopeOn = apvts.getRawParameterValue("scope")->load() > 0.5f;
@@ -302,19 +391,21 @@ public:
                 }
         }
 
-        const bool transportOk = (!syncEnabled) || transportRunning.load(std::memory_order_acquire);
+        // const bool transportOk = (!syncEnabled) || transportRunning.load(std::memory_order_acquire);
 
-        // EG-forced run ignores transport gate
-        const bool wantsLfo = lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
+        // // EG-forced run ignores transport gate
+        // const bool wantsLfo = lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
 
-        const bool shouldRunLfo = wantsLfo && (transportOk || (lfoForcedActiveByEg && egToLfoEffective));
+        // const bool shouldRunLfo = wantsLfo && (transportOk || lfoForcedActiveByEg);
 
-        modztakt::lfo::applyLfoActiveState (shouldRunLfo,
-                                   shape,
-                                   lfoActive,
-                                   lfoRuntimeMuted,
-                                   lfoRoutes,
-                                   lfoPhase);
+        // modztakt::lfo::applyLfoActiveState (shouldRunLfo,
+        //                            shape,
+        //                            lfoActive,
+        //                            lfoRuntimeMuted,
+        //                            lfoRoutes,
+        //                            lfoPhase);
+
+        // uiLfoIsRunning.store(shouldRunLfo && lfoActive && !lfoRuntimeMuted, std::memory_order_release);
 
         // 1) NOTE ON
         if (pending.pendingNoteOn.exchange(false, std::memory_order_acq_rel))
@@ -334,7 +425,7 @@ public:
 
                 // If EG->LFO protected run is active, ignore noteRestart unless this note-on
                 // is from the EG note source channel (so EG + its LFO route can retrigger together).
-                const bool allowRestartNow = ! (lfoForcedActiveByEg && egToLfoEffective) || (ch == egSourceChannel);
+                const bool allowRestartNow = !lfoForcedActiveByEg || (ch == egSourceChannel);
 
                 if (matchesSource && allowRestartNow)
                 {
@@ -350,20 +441,15 @@ public:
             }
         }
 
-        // 2) NOTE OFF
+        // NOTE OFF
         if (pending.pendingNoteOff.exchange(false, std::memory_order_acq_rel))
         {
             const int ch = pending.pendingNoteChannel.load (std::memory_order_relaxed);
-            // CLEANED: Removed unused 'note' variable
 
+            // NOTE-OFF is only meaningful for EG here.
+            // LFO stopping is handled by pending.requestLfoStop (which is gated by noteOffStop toggle in the parser).
             if (egIsEnabled.load (std::memory_order_relaxed) && ch == egSourceChannel)
-            {
-                egEngine.noteOff ();
-            }
-            else
-            {
-                uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
-            }
+                egEngine.noteOff();
         }
 
         // 3) Stop LFO on Note-Off (requested by callback logic)
@@ -375,6 +461,10 @@ public:
             {
                 lfoRuntimeMuted = true;
                 lfoForcedActiveByNote = false;
+
+                // UI refresh (noteOffStop stop)
+                if (!lfoActiveParam)
+                    uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
 
                 // Clear per-route suppression mask (not strictly needed, but keeps state tidy)
                 for (int i = 0; i < maxRoutes; ++i)
@@ -398,8 +488,10 @@ public:
 
                 for (int i = 0; i < maxRoutes; ++i)
                 {
-                    lfoRouteSuppressedByNoteOff[i] = (i != lfoForcedEgRouteIndex);
+                    // suppress routes NOT protected by EG; keep EG-protected routes running
+                    lfoRouteSuppressedByNoteOff[i] = !lfoForcedByEgRoute[i];
                 }
+
             }
         }
 
@@ -428,34 +520,129 @@ public:
         double eg01 = 0.0;
         bool egHasValue = false;
 
-        if (egIsEnabled.load(std::memory_order_relaxed))
+        if (egParams.enabled)
         {
             egHasValue = egEngine.processBlock(audio.getNumSamples(), eg01);
             eg01 = juce::jlimit(0.0, 1.0, eg01);
 
             // EG->LFO protected-run: while EG is active and destination is EG->LFO Route X,
             // force LFO engine to run even if transport stops / noteOffStop happens.
-            // CLEANED: Simplified egToLfoRouteIndexEffective check
-            if (egToLfoEffective && egToLfoRouteIndex >= 0 && egToLfoRouteIndex < maxRoutes)
+            // If EG is disabled, drop all protection immediately.
+            if (!egParams.enabled)
             {
-                if (egHasValue)
-                {
-                    lfoForcedActiveByEg = true;
-                    lfoForcedEgRouteIndex = egToLfoRouteIndex;
-                    lfoRuntimeMuted = false;
-                }
-                // If egHasValue == false, keep forced-run true until your "release after ramp" code clears it.
+                for (int i = 0; i < maxRoutes; ++i)
+                    lfoForcedByEgRoute[i] = false;
             }
             else
             {
-                // EG disabled OR destination not EG->LFO => release priority immediately
-                lfoForcedActiveByEg = false;
-                lfoForcedEgRouteIndex = -1;
-
                 for (int i = 0; i < maxRoutes; ++i)
-                    lfoRouteSuppressedByNoteOff[i] = false;
+                {
+                    if (!egToLfoRouteActive[i])
+                    {
+                        // not routed -> not protected
+                        lfoForcedByEgRoute[i] = false;
+                        continue;
+                    }
+
+                    if (egHasValue)
+                    {
+                        // EG running -> protect this route
+                        lfoForcedByEgRoute[i] = true;
+                        lfoRuntimeMuted = false;
+                    }
+                    else
+                    {
+                        // EG ended -> keep protection only while neutral ramp is still finishing
+                        const bool rampStillRunning = neutralRampActive[i] || egGateWasOpen[i];
+                        if (!rampStillRunning)
+                            lfoForcedByEgRoute[i] = false;
+                    }
+                }
             }
+
+            // derive global flag
+            lfoForcedActiveByEg = false;
+            for (int i = 0; i < maxRoutes; ++i)
+                lfoForcedActiveByEg = lfoForcedActiveByEg || lfoForcedByEgRoute[i];
+
+            // --------------------------------------------------------------------
+            // UI Start/Stop sync when EG becomes (or stops being) the run source
+            // --------------------------------------------------------------------
+            const bool anyOtherForceNow = lfoForcedActiveByNote || lfoForcedActiveByPlay;
+
+            // EG just started driving at least one LFO route
+            if (!egWasDrivingLfo && lfoForcedActiveByEg)
+            {
+                // Only flip UI ON if user didn't already explicitly turn it on
+                if (!lfoActiveParam)
+                    uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
+            }
+
+            // EG just stopped driving, and nothing else is forcing and user didn't leave LFO on
+            if (egWasDrivingLfo && !lfoForcedActiveByEg)
+            {
+                if (!lfoActiveParam && !anyOtherForceNow)
+                    uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+            }
+
+            egWasDrivingLfo = lfoForcedActiveByEg;
+
+
+            // If EG is not forcing anything anymore, clear noteOff suppression mask
+            // if (!lfoForcedActiveByEg)
+            // {
+            //     for (int i = 0; i < maxRoutes; ++i)
+            //         lfoRouteSuppressedByNoteOff[i] = false;
+            // }
         }
+
+        else
+        {
+            // EG disabled: ensure EG isn't considered a run source
+            if (egWasDrivingLfo)
+            {
+                // EG was driving last block, now disabled -> treat as stop
+                const bool anyOtherForceNow = lfoForcedActiveByNote || lfoForcedActiveByPlay;
+                if (!lfoActiveParam && !anyOtherForceNow)
+                    uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+            }
+
+            egWasDrivingLfo = false;
+
+            for (int i = 0; i < maxRoutes; ++i)
+                lfoForcedByEgRoute[i] = false;
+
+            lfoForcedActiveByEg = false;
+        }
+
+        const bool transportOk = (!syncEnabled) || transportRunning.load(std::memory_order_acquire);
+
+        // EG-forced run ignores transport gate
+        const bool wantsLfo = lfoActiveParam || lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
+
+        const bool shouldRunLfo = wantsLfo && (transportOk || lfoForcedActiveByEg);
+
+        modztakt::lfo::applyLfoActiveState (shouldRunLfo,
+                                   shape,
+                                   lfoActive,
+                                   lfoRuntimeMuted,
+                                   lfoRoutes,
+                                   lfoPhase);
+
+        uiLfoIsRunning.store(shouldRunLfo && lfoActive && !lfoRuntimeMuted, std::memory_order_release);
+
+
+        // If EG was the last run source and just finished, update Start/Stop UI
+       // const bool anyOtherForce = lfoForcedActiveByNote || lfoForcedActiveByPlay;
+        //const bool shouldBeRunningForUi = (lfoActiveParam || anyOtherForce || lfoForcedActiveByEg);
+
+        // Only request UI OFF on a falling edge (was running -> now not running)
+        // if (uiLfoIsRunning.load(std::memory_order_acquire) && !shouldBeRunningForUi)
+        // {
+        //     //requestUiLfoOff("LFO stopped (falling edge)");
+        //     uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
+        // }
+
 
         // LFO generation + send
         if (lfoActive && !lfoRuntimeMuted)
@@ -511,7 +698,7 @@ public:
                     // EG->LFO: gate + neutral on end (shape-domain only)
                     bool shouldSend = true;
 
-                    const bool egToThisRoute = (egToLfoRouteIndex == i);
+                    const bool egToThisRoute = egToLfoRouteActive[i];
                     
                     // If LFO isn't user-enabled and isn't forced by note/play, then during EG-forced run
                     // only the targeted route is allowed to emit MIDI.
@@ -519,7 +706,8 @@ public:
 
                     if (!anyUserOrOtherForce && lfoForcedActiveByEg)
                     {
-                        if (i != lfoForcedEgRouteIndex)
+                        // only allow EG-protected routes to emit when EG is the only run source
+                        if (!lfoForcedByEgRoute[i])
                             continue;
                     }
 
@@ -654,35 +842,6 @@ public:
             }
         }
 
-        // Release EG-forced run only after EG ended AND neutral ramp finished.
-        if (lfoForcedActiveByEg && !egHasValue)
-        {
-            const int r = lfoForcedEgRouteIndex;
-
-            const bool routeValid = (r >= 0 && r < maxRoutes);
-
-            if (!routeValid)
-            {
-                lfoForcedActiveByEg = false;
-                lfoForcedEgRouteIndex = -1;
-            }
-            else
-            {
-                const bool rampDone = !neutralRampActive[r] && !egGateWasOpen[r];
-
-                if (rampDone)
-                {
-                    lfoForcedActiveByEg = false;
-                    lfoForcedEgRouteIndex = -1;
-
-                    // CLEANED: Removed commented-out code and simplified logic
-                    const bool refreshStartButton = lfoForcedActiveByNote || lfoForcedActiveByPlay || lfoForcedActiveByEg;
-                    if (!refreshStartButton)
-                        uiRequestSetLfoActiveOff.store(true, std::memory_order_release);
-                }
-            }
-        }
-
         // EG send (re-use eg01 computed earlier in the block)
         if (egHasValue)
         {
@@ -691,39 +850,25 @@ public:
             scopeValues[2].store(egScopeValue, std::memory_order_relaxed);
            #endif
 
-            const int outCh  = (int) apvts.getRawParameterValue("egOutChannel")->load();
-
-            if (!egToLfoEffective) // send to MIDI output
+            for (int r = 0; r < maxRoutes; ++r)
             {
-                const int paramIdx = SyntaktParameterEgIndex[egDestChoice];
+                const auto& er = egRoutesRt[r];
+                if (er.channel == 0) continue;
+                if (er.toLfo) continue; // internal, no MIDI send
 
-                // UI already prevents this conflict, automation safety guard
-                bool egConflictsWithLfo = false;
+                const int globalParamIdx = SyntaktParameterEgIndex[er.destChoice];
+                const int egValue = mapEgToMidi(eg01, globalParamIdx);
+                const auto& param = syntaktParameters[globalParamIdx];
 
-                for (int r = 0; r < maxRoutes; ++r)
-                {
-                    const auto& lfoR = lfoRoutes[r];
-                    if (lfoR.midiChannel == outCh && lfoR.parameterIndex == paramIdx)
-                    {
-                        egConflictsWithLfo = true;
-                        break;
-                    }
-                }
-                if (!egConflictsWithLfo)
-                {
-                    const int egValue  = mapEgToMidi(eg01, paramIdx);
-
-                    const auto& param = syntaktParameters[paramIdx];
-
-                    sendThrottledParamValueToBuffer(midi,
-                                                    EG_ROUTE_KEY,  // CLEANED: Use constant for magic number
-                                                    outCh,
-                                                    param,
-                                                    egValue,
-                                                    0);
-                }
+                // Use a unique routeIndex key per EG route (not 0x7FFF for all)
+                const int egRouteKey = (EG_ROUTE_KEY + r); // e.g. 0x7FFF, 0x8000, 0x8001
+                sendThrottledParamValueToBuffer(midi,
+                                                egRouteKey,
+                                                er.channel,
+                                                param,
+                                                egValue,
+                                                0);
             }
-            
         }
 
         // Advance global time after processing the block
@@ -853,6 +998,8 @@ private:
     double msPerSample = 0.0;
     double timeMs = 0.0;
 
+    static constexpr int maxRoutes = 3;
+
     // LFO state flags
     bool lfoRuntimeMuted = false;
     bool lfoForcedActiveByNote = false;
@@ -870,8 +1017,9 @@ private:
     bool lfoForcedActiveByPlay = false;
 
     // EG -> LFO "protected run" (Option A: only UI Start/Stop can kill)
+    std::array<bool, maxRoutes> lfoForcedByEgRoute { false, false, false }; // protected-run per route
+
     bool lfoForcedActiveByEg = false;      // audio thread only
-    int  lfoForcedEgRouteIndex = -1;       // 0..maxRoutes-1, audio thread only
 
     std::atomic<double> bpmForUi { 0.0 };
     std::atomic<bool>   hostTransportRunning { false };
@@ -885,7 +1033,6 @@ private:
     MidiClockHandler midiClock;
 
     // LFO state
-    static constexpr int maxRoutes = 3;
     static constexpr int EG_ROUTE_KEY = 0x7FFF;  // CLEANED: Named constant for magic number
 
     std::array<RouteSnapshot, maxRoutes> lastRouteSnapshot {};
@@ -919,6 +1066,9 @@ private:
     // EG
     modztakt::eg::Engine egEngine;
     std::atomic<bool> egIsEnabled { false };
+    std::array<bool, maxRoutes> egToLfoRouteActive { false, false, false };
+
+    bool egWasDrivingLfo = false;  // audio thread only, edge detector for UI
 
     // Throttle state for outgoing MIDI
     std::unordered_map<int, int>    lastSentValuePerParam;
@@ -1019,8 +1169,8 @@ private:
         for (int i = 0; i < (int) juce::numElementsInArray(syntaktParameters); ++i)
             syntaktParamNames.add (syntaktParameters[i].name);
 
-        // Route channel choices
-        auto makeChannelChoices = []()
+        // LFO Route channel choices
+        auto makeLFOChannelChoices = []()
         {
             juce::StringArray s;
             s.add ("Disabled");
@@ -1037,7 +1187,7 @@ private:
             p.push_back (std::make_unique<juce::AudioParameterChoice>(
                 "route" + rs + "_channel",
                 "Route " + rs + " Channel",
-                makeChannelChoices(),
+                makeLFOChannelChoices(),
                 (r == 0 ? 1 : 0) // default: route0=Ch1, others Disabled
             ));
 
@@ -1075,17 +1225,17 @@ private:
 
         // Time params are stored in seconds (same as your sliders)
         p.push_back (std::make_unique<juce::AudioParameterFloat>(
-            "egAttackSec", "EG Attack",
+            "egAttack", "EG Attack",
             juce::NormalisableRange<float>(0.0005f, 10.0f, 0.0f, 0.40f),
             0.01f));
 
         p.push_back (std::make_unique<juce::AudioParameterFloat>(
-            "egHoldSec", "EG Hold",
+            "egHold", "EG Hold",
             juce::NormalisableRange<float>(0.0f, 5.0f),
             0.0f));
 
         p.push_back (std::make_unique<juce::AudioParameterFloat>(
-            "egDecaySec", "EG Decay",
+            "egDecay", "EG Decay",
             juce::NormalisableRange<float>(0.001f, 10.0f, 0.0f, 0.45f),
             0.20f));
 
@@ -1095,7 +1245,7 @@ private:
             0.70f));
 
         p.push_back (std::make_unique<juce::AudioParameterFloat>(
-            "egReleaseSec", "EG Release",
+            "egRelease", "EG Release",
             juce::NormalisableRange<float>(0.005f, 10.0f, 0.0f, 0.45f),
             0.20f));
 
@@ -1128,16 +1278,37 @@ private:
             "egNoteSourceChannel", "EG Note Source Channel",
             1, 16, 1));
 
-        // EG output MIDI channel (1..16)
-        p.push_back (std::make_unique<juce::AudioParameterInt>(
-            "egOutChannel", "EG Out Channel",
-            1, 16, 1));
+        // EG ROUTES (maxEGRoutes)
+        auto makeEGChannelChoices = []()
+        {
+            juce::StringArray s;
+            s.add("Disabled");
+            for (int ch = 1; ch <= 16; ++ch)
+                s.add("Ch " + juce::String(ch));
+            return s;
+        };
 
-        p.push_back (std::make_unique<juce::AudioParameterChoice>(
-            "egDestParamIndex",
-            "EG Destination Param Index",
-            SyntaktParameterEG, 
-            ModzTaktAudioProcessor::findFirstEgDestination()));  // Default to first EG destination
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs = juce::String(r);
+
+            // 0 = Disabled, 1..16 = Ch1..Ch16  (Choice index)
+            p.push_back (std::make_unique<juce::AudioParameterChoice>(
+                "egRoute" + rs + "_channel",
+                "EG Route " + rs + " Channel",
+                makeEGChannelChoices(),
+                0   // default: all eg routes Disabled
+            ));
+
+            // Destination choice: uses SyntaktParameterEG (EG destinations + "EG to LFO Route 1..3")
+            p.push_back (std::make_unique<juce::AudioParameterChoice>(
+                "egRoute" + rs + "_dest",
+                "EG Route " + rs + " Destination",
+                SyntaktParameterEG,
+                ModzTaktAudioProcessor::findFirstEgDestination()
+            ));
+        }
+
 
         // SETTINGS MENU PARAMETERS (Performance)
         // MIDI Data Throttle (change threshold in steps)

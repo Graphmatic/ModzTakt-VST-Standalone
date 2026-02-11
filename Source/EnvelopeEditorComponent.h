@@ -53,58 +53,54 @@ public:
         noteSourceChannelAttach = std::make_unique<ChoiceAttachment>(apvts, "egNoteSourceChannel", noteSourceEgChannelBox);
 
         // ---- EG Out channel + destination
-        midiChannelLabel.setText("Dest. Channel", juce::dontSendNotification);
-        addAndMakeVisible(midiChannelLabel);
-        addAndMakeVisible(midiChannelBox);
-        for (int ch = 1; ch <= 16; ++ch)
-            midiChannelBox.addItem("Ch " + juce::String(ch), ch);
-
-        egOutChannelAttach = std::make_unique<ChoiceAttachment>(apvts, "egOutChannel", midiChannelBox);
-
-        destinationLabel.setText("Dest. CC", juce::dontSendNotification);
-        addAndMakeVisible(destinationLabel);
-        addAndMakeVisible(destinationBox);
-
-        populateEgDestinationBox();
-        //apvts
-        egDestAttach = std::make_unique<ChoiceAttachment>(apvts, "egDestParamIndex", destinationBox);
-
-        
-
-        destinationBox.onChange = [this]()
+        for (int r = 0; r < maxRoutes; ++r)
         {
-            // egDestParamIndex is a Choice param => selectedIndex 0..N-1
-            const int sel = destinationBox.getSelectedItemIndex();
+            const auto rs = juce::String(r);
 
-            // Count how many EG destinations exist (must match the first part of the list)
-            int egDestCount = 0;
-            for (int i = 0; i < juce::numElementsInArray(syntaktParameters); ++i)
-                if (syntaktParameters[i].egDestination)
-                    ++egDestCount;
+            egRouteChannelLabel[r].setText("Route " + juce::String(r+1) + " Ch", juce::dontSendNotification);
+            addAndMakeVisible(egRouteChannelLabel[r]);
 
-            const bool isEgToLfo = (sel >= egDestCount);
+            addAndMakeVisible(egRouteChannelBox[r]);
+            egRouteChannelBox[r].addItem("Disabled", 1);
+            for (int ch = 1; ch <= 16; ++ch)
+                egRouteChannelBox[r].addItem("Ch " + juce::String(ch), ch + 1); // 2..17
 
-            // If routing to LFO, “EG Out Channel” is irrelevant
-            midiChannelBox.setEnabled(!isEgToLfo);
-            midiChannelLabel.setEnabled(!isEgToLfo);
+            egRouteChannelAttach[r] = std::make_unique<ChoiceAttachment>(
+                apvts, "egRoute" + rs + "_channel", egRouteChannelBox[r]
+            );
 
-            // change label text
-            destinationLabel.setText(isEgToLfo ? "Dest. (internal)" : "Dest. CC", juce::dontSendNotification);
-        };
+            egRouteDestLabel[r].setText("Route " + juce::String(r+1) + " Dest", juce::dontSendNotification);
+            addAndMakeVisible(egRouteDestLabel[r]);
 
-        destinationBox.onChange();
+            addAndMakeVisible(egRouteDestBox[r]);
+
+            populateEgDestinationBox(egRouteDestBox[r]);
+            
+            egRouteDestAttach[r] = std::make_unique<ChoiceAttachment>(
+                apvts, "egRoute" + rs + "_dest", egRouteDestBox[r]
+            );
+
+            egRouteChannelBox[r].onChange = [this]() { refreshEgRouteAvailability(); };
+            egRouteDestBox[r].onChange    = [this]() { refreshEgRouteAvailability(); };
+
+            // init snapshots
+            lastValidEgChanId[r] = egRouteChannelBox[r].getSelectedId();
+            lastValidEgDestId[r] = egRouteDestBox[r].getSelectedId();
+        }
+
+        refreshEgRouteAvailability();
 
         // ---- Sliders 
         // ---- apvts
-        attackAttach  = std::make_unique<SliderAttachment>(apvts, "egAttackSec",  attackSlider);
+        attackAttach  = std::make_unique<SliderAttachment>(apvts, "egAttack",  attackSlider);
         setupAttackSlider();
-        holdAttach    = std::make_unique<SliderAttachment>(apvts, "egHoldSec",    holdSlider);
+        holdAttach    = std::make_unique<SliderAttachment>(apvts, "egHold",    holdSlider);
         setupHoldSlider();
-        decayAttach   = std::make_unique<SliderAttachment>(apvts, "egDecaySec",   decaySlider);
+        decayAttach   = std::make_unique<SliderAttachment>(apvts, "egDecay",   decaySlider);
         setupDecaySlider();
         sustainAttach = std::make_unique<SliderAttachment>(apvts, "egSustain",    sustainSlider);
         setupSustainSlider();
-        releaseAttach = std::make_unique<SliderAttachment>(apvts, "egReleaseSec", releaseSlider);
+        releaseAttach = std::make_unique<SliderAttachment>(apvts, "egRelease", releaseSlider);
         setupReleaseSlider();
         velAttach     = std::make_unique<SliderAttachment>(apvts, "egVelAmount",  velocityAmountSlider);
         setupVelocitySlider();
@@ -228,15 +224,19 @@ public:
         updateReleaseSliderOutline();
 
         // Refresh EG dest. param list to avoid conflict with LFO dest. parameters
-        refreshEgDestConflicts();
+        refreshEgRouteAvailability();
     }
 
     ~EnvelopeEditorComponent() override
     {
         stopTimer();
         attackAttach.reset(); holdAttach.reset(); decayAttach.reset(); sustainAttach.reset(); releaseAttach.reset(); velAttach.reset();
-        egEnableAttach.reset(); noteSourceChannelAttach.reset(); egOutChannelAttach.reset(); egDestAttach.reset();
+        egEnableAttach.reset(); noteSourceChannelAttach.reset();
         releaseLongAttach.reset();
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            egRouteChannelAttach[r].reset();
+        }
     }
 
     void resized() override
@@ -424,9 +424,53 @@ public:
         content.removeFromTop(20);
 
         // routing rows
-        placeRow(midiChannelLabel, midiChannelBox);  
-        placeRow(destinationLabel, destinationBox);
+                content.removeFromTop(20);
 
+        // ------------------------------------------------------------
+        // EG routes (BOTTOM)
+        // ------------------------------------------------------------
+        const int gap = 6;
+
+        auto layoutRouteRow = [&](juce::Rectangle<int> row, int r)
+        {
+            juce::FlexBox fb;
+            fb.flexDirection  = juce::FlexBox::Direction::row;
+            fb.alignItems     = juce::FlexBox::AlignItems::center;
+            fb.justifyContent = juce::FlexBox::JustifyContent::flexStart;
+
+            const float labelW     = 78.0f;
+            const float chanW      = 90.0f;
+            const float destLabelW = 86.0f;
+
+            fb.items.add(juce::FlexItem(egRouteChannelLabel[r]).withWidth(labelW).withHeight((float)rowHeight));
+            fb.items.add(juce::FlexItem(egRouteChannelBox[r]).withWidth(chanW).withHeight((float)rowHeight)
+                            .withMargin({ 0, gap, 0, 0 }));
+
+            fb.items.add(juce::FlexItem(egRouteDestLabel[r]).withWidth(destLabelW).withHeight((float)rowHeight)
+                            .withMargin({ 0, gap, 0, 0 }));
+
+            fb.items.add(juce::FlexItem(egRouteDestBox[r]).withFlex(1.0f).withHeight((float)rowHeight)
+                            .withMargin({ 0, gap, 0, 0 }));
+
+            fb.performLayout(row.toFloat());
+        };
+
+        // Reserve bottom space from *content*, not *area*
+        const int routesHeight = (rowHeight + gap) * maxRoutes - gap;
+
+        // Optional: a little spacer before the routes block
+        // (only if there is enough room)
+        if (content.getHeight() > routesHeight + 10)
+            content.removeFromBottom(10);
+
+        auto routesArea = content.removeFromBottom(routesHeight);
+
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            auto row = routesArea.removeFromTop(rowHeight);
+            layoutRouteRow(row, r);
+            routesArea.removeFromTop(gap);
+        }
     }
 
 private:
@@ -439,7 +483,7 @@ private:
         syncChoiceButtons("egReleaseCurve", releaseLinear.get(), releaseExpo.get(), releaseLog.get());
 
         // prevent conflict between LFO and EG dest.param
-        refreshEgDestConflicts();
+        refreshEgRouteAvailability();
 
         // Update attack slider look based on long mode
         const int idxAttack = (int) apvts.getRawParameterValue("egAttackMode")->load();
@@ -528,11 +572,11 @@ private:
         noteSourceEgChannelBox.setEnabled(enabled);
         noteSourceEgChannelLabel.setEnabled(enabled);
 
-        destinationBox.setEnabled(enabled);
-        destinationLabel.setEnabled(enabled);
-
-        midiChannelBox.setEnabled(enabled); // 
-        midiChannelLabel.setEnabled(enabled);
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            egRouteChannelBox[r].setEnabled(enabled);
+            egRouteDestBox[r].setEnabled(enabled);
+        }
 
         attackSlider.setEnabled(enabled);
         holdSlider.setEnabled(enabled);
@@ -559,8 +603,11 @@ private:
         // Optional: alpha fade to make it obvious
         const float a = enabled ? 1.0f : 0.45f;
         noteSourceEgChannelBox.setAlpha(a);
-        destinationBox.setAlpha(a);
-        midiChannelBox.setAlpha(a);
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            egRouteChannelLabel[r].setAlpha(enabled ? 1.0f : 0.6f);
+            egRouteDestLabel[r].setAlpha(enabled ? 1.0f : 0.6f);
+        }
         attackSlider.setAlpha(a);
         holdSlider.setAlpha(a);
         decaySlider.setAlpha(a);
@@ -614,26 +661,22 @@ private:
         releaseSlider.repaint();
     }
 
-    void populateEgDestinationBox()
+    void populateEgDestinationBox(juce::ComboBox& box)
     {
-        destinationBox.clear();
-
+        box.clear();
         int itemId = 1;
 
-        // 1) Regular EG destinations (must match APVTS StringArray order!)
+        // 1) Regular EG destinations
         for (int globalIdx = 0; globalIdx < juce::numElementsInArray(syntaktParameters); ++globalIdx)
-        {
             if (syntaktParameters[globalIdx].egDestination)
-                destinationBox.addItem(syntaktParameters[globalIdx].name, itemId++);
-        }
+                box.addItem(syntaktParameters[globalIdx].name, itemId++);
 
-        // Optional separator (JUCE supports section headings / separators via addSectionHeading)
-        destinationBox.addSeparator();
+        box.addSeparator();
 
-        // 2) “Merged” EG → LFO route options (single-select)
-        destinationBox.addItem("EG to LFO Route 1", itemId++);
-        destinationBox.addItem("EG to LFO Route 2", itemId++);
-        destinationBox.addItem("EG to LFO Route 3", itemId++);
+        // 2) EG -> LFO routes
+        box.addItem("EG to LFO Route 1", itemId++);
+        box.addItem("EG to LFO Route 2", itemId++);
+        box.addItem("EG to LFO Route 3", itemId++);
     }
 
     // helpers used to prevent conflicts between LFO and EG dest. param
@@ -644,6 +687,43 @@ private:
             if (syntaktParameters[i].egDestination)
                 ++count;
         return count;
+    }
+
+    int getEgRouteChannelNumber(int r) const
+    {
+        const int id = egRouteChannelBox[r].getSelectedId(); // 1=Disabled, 2..17
+        return (id <= 1) ? 0 : (id - 1); // 0 or 1..16
+    }
+
+    int getEgRouteDestChoiceIndex(int r) const
+    {
+        // APVTS Choice index corresponds to selectedItemIndex
+        return egRouteDestBox[r].getSelectedItemIndex(); // 0..N-1
+    }
+
+    bool isEgToLfoChoice(int destChoice) const
+    {
+        return destChoice >= getEgMidiDestCount();
+    }
+
+    int getEgToLfoRouteIndex(int destChoice) const
+    {
+        return destChoice - getEgMidiDestCount(); // 0..2
+    }
+
+    bool lfoUsesChannelParam(int ch, int globalParamIdx) const
+    {
+        // LFO routes: route{r}_channel is Choice index 0=Disabled or 1..16
+        // route{r}_param is 0..N-1 (global param index)
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs = juce::String(r);
+            const int lfoCh = (int) apvts.getRawParameterValue("route" + rs + "_channel")->load();
+            const int lfoP  = (int) apvts.getRawParameterValue("route" + rs + "_param")->load();
+            if (lfoCh == ch && lfoP == globalParamIdx)
+                return true;
+        }
+        return false;
     }
 
     // Map an EG destination choice index (0..egMidiDestCount-1) to global syntakt param index.
@@ -664,60 +744,113 @@ private:
         return -1;
     }
 
-    void refreshEgDestConflicts()
+    void refreshEgRouteAvailability()
     {
-        // Only apply to the "real EG MIDI destinations" part of the list.
-        const int egMidiDestCount = getEgMidiDestCount();
-
-        // If EG is routed to LFO (choice >= egMidiDestCount) we don't care about conflicts.
-        const int egOutCh = (int) apvts.getRawParameterValue("egOutChannel")->load(); // 0..16 (0 means "off" in your UI)
-
-        // If channel is disabled/0, don't disable anything.
-        if (egOutCh <= 0)
-        {
-            for (int itemId = 1; itemId <= egMidiDestCount; ++itemId)
-                destinationBox.setItemEnabled(itemId, true);
+        if (updatingEgRouteCombos)
             return;
-        }
 
-        // Disable items that are already taken by an LFO route on same channel.
-        for (int egChoice = 0; egChoice < egMidiDestCount; ++egChoice)
+        updatingEgRouteCombos = true;
+
+        const int egMidiDestCount = getEgMidiDestCount(); // real EG dest count
+        const int totalChoices = egMidiDestCount + maxRoutes; // + "EG to LFO Route 1..3"
+
+        for (int r = 0; r < maxRoutes; ++r)
         {
-            const int globalParamIdx = mapEgChoiceToGlobalParamIndex(egChoice);
+            const int ch = getEgRouteChannelNumber(r);          // 0 or 1..16
+            const int selChoice = getEgRouteDestChoiceIndex(r); // 0..totalChoices-1
 
-            bool conflict = false;
-            if (globalParamIdx >= 0)
+            // If EG route disabled -> keep all enabled for clarity
+            if (ch <= 0)
             {
-                // Compare against all LFO routes in APVTS
-                for (int r = 0; r < maxRoutes; ++r)
-                {
-                    const auto rs = juce::String(r);
+                for (int itemId = 1; itemId <= totalChoices; ++itemId)
+                    egRouteDestBox[r].setItemEnabled(itemId, true);
 
-                    const int lfoChChoice0 =
-                        (int) apvts.getRawParameterValue("route" + rs + "_channel")->load(); // 0=Disabled, 1..16
-
-                    const int lfoCh = (lfoChChoice0 == 0) ? 0 : lfoChChoice0;
-
-                    const int lfoParam =
-                        (int) apvts.getRawParameterValue("route" + rs + "_param")->load(); // 0..N-1 global
-
-                    if (lfoCh == egOutCh && lfoParam == globalParamIdx)
-                    {
-                        conflict = true;
-                        break;
-                    }
-                }
+                continue;
             }
 
-            destinationBox.setItemEnabled(egChoice + 1, !conflict); // itemId = choice+1
+            // --- disable/enable each destination item for this route ---
+            for (int choice = 0; choice < totalChoices; ++choice)
+            {
+                bool allowed = true;
+
+                const bool isEgToLfo = (choice >= egMidiDestCount);
+
+                if (isEgToLfo)
+                {
+                    // EG->LFO choice must be unique across EG routes
+                    const int targetLfoRoute = choice - egMidiDestCount; // 0..2
+
+                    for (int other = 0; other < maxRoutes; ++other)
+                    {
+                        if (other == r) continue;
+
+                        const int otherChoice = getEgRouteDestChoiceIndex(other);
+                        const int otherCh     = getEgRouteChannelNumber(other);
+
+                        if (otherCh <= 0) continue;
+
+                        if (otherChoice >= egMidiDestCount)
+                        {
+                            const int otherTarget = otherChoice - egMidiDestCount;
+                            if (otherTarget == targetLfoRoute)
+                            {
+                                allowed = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Real EG MIDI destination -> (channel, param) must be unique and not used by LFO
+                    const int globalParamIdx = mapEgChoiceToGlobalParamIndex(choice);
+                    if (globalParamIdx < 0)
+                    {
+                        allowed = false;
+                    }
+                    else
+                    {
+                        // Conflict with LFO routes?
+                        if (lfoUsesChannelParam(ch, globalParamIdx))
+                        {
+                            allowed = false;
+                        }
+                        else
+                        {
+                            // Conflict with other EG routes on same channel?
+                            for (int other = 0; other < maxRoutes; ++other)
+                            {
+                                if (other == r) continue;
+
+                                const int otherCh = getEgRouteChannelNumber(other);
+                                if (otherCh != ch) continue;
+
+                                const int otherChoice = getEgRouteDestChoiceIndex(other);
+                                if (otherChoice < 0 || otherChoice >= egMidiDestCount)
+                                    continue; // either disabled or EG->LFO choice
+
+                                const int otherParam = mapEgChoiceToGlobalParamIndex(otherChoice);
+                                if (otherParam == globalParamIdx)
+                                {
+                                    allowed = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Keep current selection always enabled to avoid "locking" UI if host automation set it.
+                if (choice == selChoice)
+                    allowed = true;
+
+                egRouteDestBox[r].setItemEnabled(choice + 1, allowed); // itemId = choice+1
+            }
         }
 
-        // Keep the currently selected item enabled so the UI doesn't "lock up"
-        // if automation set it already.
-        const int selectedItemId = destinationBox.getSelectedId();
-        if (selectedItemId >= 1 && selectedItemId <= egMidiDestCount)
-            destinationBox.setItemEnabled(selectedItemId, true);
+        updatingEgRouteCombos = false;
     }
+
 
     // AHDSR Sliders setup
     void setupAttackSlider()
@@ -865,13 +998,21 @@ private:
     juce::ComboBox noteSourceEgChannelBox;
     std::unique_ptr<ChoiceAttachment> noteSourceChannelAttach;
 
-    juce::Label midiChannelLabel;
-    juce::ComboBox midiChannelBox;
-    std::unique_ptr<ChoiceAttachment> egOutChannelAttach;
+    static constexpr int maxRoutes = 3;
 
-    juce::Label destinationLabel;
-    juce::ComboBox destinationBox;
-    std::unique_ptr<ChoiceAttachment> egDestAttach;
+    std::array<juce::Label,   maxRoutes> egRouteChannelLabel;
+    std::array<juce::ComboBox,maxRoutes> egRouteChannelBox;
+    std::array<std::unique_ptr<ChoiceAttachment>, maxRoutes> egRouteChannelAttach;
+
+    std::array<juce::Label,   maxRoutes> egRouteDestLabel;
+    std::array<juce::ComboBox,maxRoutes> egRouteDestBox;
+    std::array<std::unique_ptr<ChoiceAttachment>, maxRoutes> egRouteDestAttach;
+
+    // For conflict handling / exclusion UI
+    std::array<int, maxRoutes> lastValidEgChanId { 1, 1, 1 };  // Combo IDs (1=Disabled, 2..17=Ch)
+    std::array<int, maxRoutes> lastValidEgDestId { 1, 1, 1 };  // Combo IDs (itemId)
+    bool updatingEgRouteCombos = false;
+
 
     // ---- enable
     std::unique_ptr<LedToggleButton> egEnable;
@@ -894,8 +1035,6 @@ private:
     std::unique_ptr<LedToggleButton> releaseLinear, releaseExpo, releaseLog;
     std::unique_ptr<ButtonAttachment> releaseLongAttach;
     juce::Label releaseLinearLabel, releaseExpoLabel, releaseLogLabel, releaseLongLabel;
-
-    static constexpr int maxRoutes = 3;
 
     // look & feel from your Cosmetic.h
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };

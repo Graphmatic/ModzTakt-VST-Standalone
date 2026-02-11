@@ -803,7 +803,6 @@ public:
         );
         #endif
 
-
         // setting button
         constexpr int size = 24;
 
