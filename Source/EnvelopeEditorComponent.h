@@ -421,14 +421,9 @@ public:
 
         placeRow(velocityAmountLabel, velocityAmountSlider);
 
-        content.removeFromTop(20);
+        content.removeFromTop(40);
 
-        // routing rows
-                content.removeFromTop(20);
-
-        // ------------------------------------------------------------
-        // EG routes (BOTTOM)
-        // ------------------------------------------------------------
+        // EG routes
         const int gap = 6;
 
         auto layoutRouteRow = [&](juce::Rectangle<int> row, int r)
@@ -455,11 +450,8 @@ public:
             fb.performLayout(row.toFloat());
         };
 
-        // Reserve bottom space from *content*, not *area*
         const int routesHeight = (rowHeight + gap) * maxRoutes - gap;
 
-        // Optional: a little spacer before the routes block
-        // (only if there is enough room)
         if (content.getHeight() > routesHeight + 10)
             content.removeFromBottom(10);
 
@@ -666,17 +658,16 @@ private:
         box.clear();
         int itemId = 1;
 
-        // 1) Regular EG destinations
+        // Regular EG destinations
         for (int globalIdx = 0; globalIdx < juce::numElementsInArray(syntaktParameters); ++globalIdx)
             if (syntaktParameters[globalIdx].egDestination)
                 box.addItem(syntaktParameters[globalIdx].name, itemId++);
 
         box.addSeparator();
 
-        // 2) EG -> LFO routes
-        box.addItem("EG to LFO Route 1", itemId++);
-        box.addItem("EG to LFO Route 2", itemId++);
-        box.addItem("EG to LFO Route 3", itemId++);
+        // EG -> LFO
+        box.addItem("EG to LFO Depth", itemId++);
+        box.addItem("EG to LFO Rate", itemId++);
     }
 
     // helpers used to prevent conflicts between LFO and EG dest. param
@@ -752,7 +743,7 @@ private:
         updatingEgRouteCombos = true;
 
         const int egMidiDestCount = getEgMidiDestCount(); // real EG dest count
-        const int totalChoices = egMidiDestCount + maxRoutes; // + "EG to LFO Route 1..3"
+        const int totalChoices = egMidiDestCount + 2; // + "EG to LFO rate or depth"
 
         for (int r = 0; r < maxRoutes; ++r)
         {
@@ -850,7 +841,6 @@ private:
 
         updatingEgRouteCombos = false;
     }
-
 
     // AHDSR Sliders setup
     void setupAttackSlider()
@@ -987,13 +977,13 @@ private:
 
     APVTS& apvts;
 
-    // ---- group
+    // group
     juce::GroupComponent egGroup;
 
-    // ---- EG On/Off
+    // EG On/Off
     juce::Label egEnableLabel;
 
-    // ---- routing
+    // routing
     juce::Label noteSourceEgChannelLabel;
     juce::ComboBox noteSourceEgChannelBox;
     std::unique_ptr<ChoiceAttachment> noteSourceChannelAttach;
@@ -1013,18 +1003,17 @@ private:
     std::array<int, maxRoutes> lastValidEgDestId { 1, 1, 1 };  // Combo IDs (itemId)
     bool updatingEgRouteCombos = false;
 
-
-    // ---- enable
+    // enable
     std::unique_ptr<LedToggleButton> egEnable;
     std::unique_ptr<ButtonAttachment> egEnableAttach;
 
-    // ---- sliders
+    // sliders
     juce::Slider attackSlider, holdSlider, decaySlider, sustainSlider, releaseSlider, velocityAmountSlider;
     juce::Label  attackLabel,  holdLabel,  decayLabel,  sustainLabel,  releaseLabel,  velocityAmountLabel;
 
     std::unique_ptr<SliderAttachment> attackAttach, holdAttach, decayAttach, sustainAttach, releaseAttach, velAttach;
 
-    // ---- modes
+    // modes
     std::unique_ptr<LedToggleButton> attackFast, attackLong, attackSnap;
     juce::Label attackFastLabel, attackLongLabel, attackSnapLabel;
     std::unique_ptr<LedToggleButton> releaseLong;

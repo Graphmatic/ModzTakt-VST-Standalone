@@ -1027,8 +1027,8 @@ private:
             }
         }
 
-        const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
-        startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
+        // const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
+        // startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
 
         if (processor.uiRequestSetRateHz.exchange(false, std::memory_order_acq_rel))
         {
