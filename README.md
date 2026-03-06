@@ -1,7 +1,6 @@
 A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or other synth if you edit MIDI CC routing)
 
-<img width="1427" height="723" alt="Screenshot from 2026-03-06 13-17-09" src="https://github.com/user-attachments/assets/30b22000-14fd-4326-a677-9b21f2e97ef2" />
-
+<img width="1427" height="723" alt="Screenshot from 2026-03-06 13-30-10" src="https://github.com/user-attachments/assets/8247fed2-f8e7-48ee-a97e-afca85d4afaf" />
 
 - one LFO with routing to up to 3 MIDI channels (so up to 3 Syntakt tracks can share the same LFO, with independent CC destination for each track).
 -- LFO can be synced to MIDI clock
