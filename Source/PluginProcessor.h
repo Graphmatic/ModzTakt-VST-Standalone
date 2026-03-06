@@ -672,12 +672,15 @@ public:
             delayParams.delayTimeMs = (float) modztakt::delay::divisionToMs(bpm, delaySyncDivIdx);
         }
 
-        // Read output route channels (0 = Disabled, 1..16 = Ch1..Ch16).
+        // Read output route channels (0 = Disabled, 1..16 = Ch1..Ch16) and transpose.
         for (int r = 0; r < maxRoutes; ++r)
         {
             const int chChoice = (int) apvts.getRawParameterValue(
                 "delayRoute" + juce::String(r) + "_channel")->load();
-            delayParams.routeChannels[r] = (chChoice == 0) ? 0 : chChoice;
+            delayParams.routeChannels[r]  = (chChoice == 0) ? 0 : chChoice;
+
+            delayParams.routeTranspose[r] = (int) apvts.getRawParameterValue(
+                "delayRoute" + juce::String(r) + "_transpose")->load();
         }
 
         delayEngine.setParams(delayParams);
@@ -1337,6 +1340,13 @@ private:
                 "Delay Route " + juce::String (r) + " Channel",
                 makeDelayChannelChoices(),
                 0  // default: Disabled
+            ));
+
+            // Semitone transpose per route  (-24 .. +24, default 0)
+            p.push_back (std::make_unique<juce::AudioParameterInt>(
+                "delayRoute" + juce::String (r) + "_transpose",
+                "Delay Route " + juce::String (r) + " Transpose",
+                -24, 24, 0
             ));
         }
 

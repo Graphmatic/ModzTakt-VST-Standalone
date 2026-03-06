@@ -86,7 +86,7 @@ public:
                                                              feedbackSlider);
         setupFeedbackSlider();
 
-        // ── Output route channel boxes ────────────────────────────────────────
+        // ── Output route channel boxes + transpose sliders ────────────────────
         for (int r = 0; r < maxRoutes; ++r)
         {
             const auto rs = juce::String (r);
@@ -97,7 +97,6 @@ public:
             addAndMakeVisible (delayRouteLabel[r]);
 
             // ComboBox IDs: 1 = Disabled, 2..17 = Ch1..Ch16
-            // This matches the APVTS Choice param (indices 0..16).
             delayRouteChannelBox[r].addItem ("Disabled", 1);
             for (int ch = 1; ch <= 16; ++ch)
                 delayRouteChannelBox[r].addItem ("Ch " + juce::String (ch), ch + 1);
@@ -105,6 +104,12 @@ public:
 
             delayRouteChannelAttach[r] = std::make_unique<ChoiceAttachment> (
                 apvts, "delayRoute" + rs + "_channel", delayRouteChannelBox[r]);
+
+            // Transpose slider  (-24 .. +24 semitones, integer steps)
+            // Attachment is created BEFORE setupTransposeSlider so APVTS sets initial value.
+            delayRouteTransposeAttach[r] = std::make_unique<SliderAttachment> (
+                apvts, "delayRoute" + rs + "_transpose", delayRouteTransposeSlider[r]);
+            setupTransposeSlider (delayRouteTransposeSlider[r]);
         }
 
         startTimerHz (20);
@@ -121,8 +126,12 @@ public:
         delaySyncAttach.reset();
         delayRateAttach.reset();
         feedbackAttach.reset();
+
         for (int r = 0; r < maxRoutes; ++r)
+        {
             delayRouteChannelAttach[r].reset();
+            delayRouteTransposeAttach[r].reset();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -166,35 +175,44 @@ public:
             fb.performLayout (row);
         }
 
-        content.removeFromTop (12);
+        content.removeFromTop (20);
 
         // ── Note Source channel ───────────────────────────────────────────────
         placeRow (noteSourceDelayChannelLabel, noteSourceDelayChannelBox);
 
+        content.removeFromTop (10);
+
         // ── Sync division ─────────────────────────────────────────────────────
         placeRow (delaySyncLabel, delaySyncBox);
 
-        content.removeFromTop (10);
+        content.removeFromTop (18);
 
         // ── Sliders ───────────────────────────────────────────────────────────
         placeRow (delayRateLabel, delayRateSlider);
+
+        content.removeFromTop (18);
+
         placeRow (feedbackLabel,  feedbackSlider);
 
         content.removeFromTop (14);
 
         // ── Output route rows ─────────────────────────────────────────────────
+        // Each row: [Route N label | Channel combobox | Transpose slider]
         auto layoutRouteRow = [&] (juce::Rectangle<int> row, int r)
         {
             juce::FlexBox fb;
             fb.flexDirection  = juce::FlexBox::Direction::row;
             fb.alignItems     = juce::FlexBox::AlignItems::center;
-            fb.justifyContent = juce::FlexBox::JustifyContent::center;
+            fb.justifyContent = juce::FlexBox::JustifyContent::flexStart;
 
             fb.items.add (juce::FlexItem (delayRouteLabel[r])
-                              .withWidth (64.0f).withHeight ((float) rowHeight));
+                              .withWidth (50.0f).withHeight ((float) rowHeight));
             fb.items.add (juce::FlexItem (delayRouteChannelBox[r])
-                              .withWidth (90.0f).withHeight ((float) rowHeight)
-                              .withMargin ({ 0, 16, 0, 0 }));
+                              .withWidth (80.0f).withHeight ((float) rowHeight)
+                              .withMargin ({ 0, 6, 0, 0 }));
+            fb.items.add (juce::FlexItem (delayRouteTransposeSlider[r])
+                              .withFlex (1.0f).withHeight ((float) rowHeight)
+                              .withMargin ({ 0, 8, 0, 0 }));
 
             fb.performLayout (row.toFloat());
         };
@@ -212,6 +230,7 @@ public:
             layoutRouteRow (row, r);
             routesArea.removeFromTop (8);
         }
+
     }
 
 private:
@@ -251,6 +270,7 @@ private:
         {
             delayRouteChannelBox[r].setEnabled (enabled);
             delayRouteLabel[r].setEnabled (enabled);
+            delayRouteTransposeSlider[r].setEnabled (enabled);
         }
 
         // Visual alpha fade.
@@ -268,6 +288,7 @@ private:
         {
             delayRouteChannelBox[r].setAlpha (a);
             delayRouteLabel[r].setAlpha (enabled ? 1.0f : 0.60f);
+            delayRouteTransposeSlider[r].setAlpha (a);
         }
     }
 
@@ -322,6 +343,31 @@ private:
         feedbackSlider.updateText();
     }
 
+    // Shared setup for all three per-route transpose sliders.
+    // Called after the APVTS attachment is created so the initial value is set.
+    void setupTransposeSlider (juce::Slider& s)
+    {
+        addAndMakeVisible (s);
+
+        s.setSliderStyle (juce::Slider::LinearHorizontal);
+        // TextBox is narrow — just enough for "-24 st"
+        s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
+        s.setLookAndFeel (&lookPurple);
+
+        // Range mirrors the APVTS AudioParameterInt (-24 .. +24, step 1).
+        s.setRange (-24.0, 24.0, 1.0);
+
+        s.textFromValueFunction = [] (double v) -> juce::String
+        {
+            const int st = static_cast<int> (v);
+            if (st == 0)  return "0 st";
+            if (st  > 0)  return "+" + juce::String (st) + " st";
+            return               juce::String (st) + " st";
+        };
+
+        s.updateText();
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     APVTS& apvts;
 
@@ -352,6 +398,10 @@ private:
     std::array<juce::Label,    maxRoutes> delayRouteLabel;
     std::array<juce::ComboBox, maxRoutes> delayRouteChannelBox;
     std::array<std::unique_ptr<ChoiceAttachment>, maxRoutes> delayRouteChannelAttach;
+
+    // Per-route transpose sliders (-24 .. +24 semitones)
+    std::array<juce::Slider,   maxRoutes> delayRouteTransposeSlider;
+    std::array<std::unique_ptr<SliderAttachment>, maxRoutes> delayRouteTransposeAttach;
 
     // Look & Feel instances (one per slider colour)
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };

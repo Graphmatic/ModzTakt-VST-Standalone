@@ -62,6 +62,9 @@ namespace modztakt::delay
         // Output MIDI channels per route.
         // 0 = Disabled, 1-16 = MIDI channel number.
         std::array<int, maxDelayRoutes> routeChannels { 0, 0, 0 };
+
+        // Semitone transpose applied to echoes per route. Range: -24 .. +24.
+        std::array<int, maxDelayRoutes> routeTranspose { 0, 0, 0 };
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -69,7 +72,8 @@ namespace modztakt::delay
     // ─────────────────────────────────────────────────────────────────────────
     struct ScheduledNote
     {
-        int    note         = 60;
+        int    originalNote = 60;  // raw input note (used for noteOff matching)
+        int    note         = 60;  // transposed note sent over MIDI
         int    velocity     = 64;   // MIDI 1 – 127
         int    channel      = 1;    // MIDI channel 1 – 16
         double onTimeMs     = 0.0;  // absolute time to fire note-on
@@ -152,8 +156,12 @@ namespace modztakt::delay
                     if (scheduledNotes.size() >= maxQueueSize)
                         return; // safety cap
 
+                    const int transposedNote = juce::jlimit (0, 127,
+                                                   note + params.routeTranspose[r]);
+
                     ScheduledNote n;
-                    n.note         = note;
+                    n.originalNote = note;           // raw note for noteOff matching
+                    n.note         = transposedNote; // what actually gets sent
                     n.velocity     = mVel;
                     n.channel      = params.routeChannels[r];
                     n.onTimeMs     = onMs;
@@ -198,9 +206,10 @@ namespace modztakt::delay
             const double echoDurMs      = juce::jmin (inputDurMs, maxEchoDurMs);
 
             // Patch all pending echoes for this note that haven't fired their note-off yet.
+            // Match on originalNote (the raw input pitch) because n.note may be transposed.
             for (auto& n : scheduledNotes)
             {
-                if (n.note != note || n.noteOffFired)
+                if (n.originalNote != note || n.noteOffFired)
                     continue;
 
                 // Recompute offTimeMs relative to this echo's own note-on time,
