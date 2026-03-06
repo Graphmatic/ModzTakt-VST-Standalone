@@ -4,6 +4,7 @@
 #include "SyntaktParameterTable.h"
 #include "MidiInput.h"
 #include "EnvelopeEditorComponent.h"
+#include "DelayEditorComponent.h"
 #include "ScopeModalComponent.h"
 #include "Cosmetic.h"
 
@@ -15,7 +16,8 @@ public:
     MainComponent (ModzTaktAudioProcessor& p)
                                             : processor (p),
                                               apvts (p.getAPVTS()),
-                                              envelopeEditor (apvts)
+                                              envelopeEditor (apvts),
+                                              delayEditor (apvts)
     {
         // frame
         lfoGroup.setText("LFO");
@@ -516,6 +518,9 @@ public:
         // Envelop Generator
         addAndMakeVisible (envelopeEditor);
 
+        // Delay
+        addAndMakeVisible (delayEditor);
+
         // Timer
         startTimerHz(30); // UI refresh, don't need to be faster
     }
@@ -540,6 +545,7 @@ public:
         // prepare column layout
         constexpr int lfoWidth = 450;
         constexpr int egWidth  = 450;
+        constexpr int delayWidth  = 450;
         constexpr int columnSpacing = 12;
 
         auto area = getLocalBounds().reduced(12);
@@ -548,6 +554,8 @@ public:
         auto lfoColumn = area.removeFromLeft(lfoWidth);
         area.removeFromLeft(columnSpacing);
         auto egColumn  = area.removeFromLeft(egWidth);
+        area.removeFromLeft(columnSpacing);
+        auto delayColumn = area.removeFromLeft(delayWidth);
 
         // LFO block (fixed-width column)
         auto lfoArea = lfoColumn;
@@ -833,6 +841,9 @@ public:
 
         // Envelop generator frame
         envelopeEditor.setBounds (egColumn);
+
+        // Delay generator frame
+        delayEditor.setBounds (delayColumn);
     }
 
     // Oscilloscope pop-up view (not modal)
@@ -897,6 +908,9 @@ private:
     ModzTaktAudioProcessor::APVTS& apvts;
 
     EnvelopeEditorComponent envelopeEditor;
+
+    DelayEditorComponent delayEditor;
+
 
     static constexpr int maxRoutes = 3;
 

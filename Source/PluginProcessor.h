@@ -9,6 +9,7 @@
 #include "MidiInput.h"
 #include "EnvelopeEngine.h"
 #include "LfoEngine.h"
+#include "DelayEngine.h"
 
 // Forward declare editor
 class ModzTaktAudioProcessorEditor;
@@ -57,6 +58,10 @@ public:
         // EG
         egEngine.setSampleRate(cachedSampleRate);
         egEngine.reset();
+
+        // Delay
+        delayEngine.setSampleRate(cachedSampleRate);
+        delayEngine.reset();
 
         // MIDI Out throttles/perf - Initialize from parameters
         if (auto* throttleParam = apvts.getParameter("midiDataThrottle"))
@@ -224,6 +229,10 @@ public:
             r.oneShot = oneShot;
         }
 
+        // Delay
+        const int delaySourceChannel = (int) apvts.getRawParameterValue("delayNoteSourceChannel")->load();
+
+
         //======================================================================
         // EG Configuration
         //======================================================================
@@ -386,7 +395,6 @@ public:
             lastHostPlaying = hostPlaying;
         }
 
-
         double rateHz = rateSliderValueHz;
 
         if (syncEnabled && bpm > 0.0)
@@ -411,6 +419,13 @@ public:
             // --- EG ---
             if (egIsEnabled.load (std::memory_order_relaxed) && ch == egSourceChannel)
                 egEngine.noteOn (velocity);
+
+            // --- DELAY ---
+            if (delayIsEnabled.load (std::memory_order_relaxed) && ch == delaySourceChannel)
+            {
+                const int note = pending.pendingNoteNumber.load (std::memory_order_relaxed);
+                delayEngine.noteOn (note, velocity, blockStartMs);
+            }
 
             // --- LFO Note Restart ---
             if (noteRestartToggleState)
@@ -443,6 +458,14 @@ public:
             // LFO stopping is handled by pending.requestLfoStop (which is gated by noteOffStop toggle in the parser).
             if (egIsEnabled.load (std::memory_order_relaxed) && ch == egSourceChannel)
                 egEngine.noteOff();
+
+            // --- DELAY ---
+            // Patches pending echo durations: min(inputNoteDuration, 70% of delayInterval)
+            if (delayIsEnabled.load (std::memory_order_relaxed) && ch == delaySourceChannel)
+            {
+                const int note = pending.pendingNoteNumber.load (std::memory_order_relaxed);
+                delayEngine.noteOff (note, blockStartMs);
+            }
         }
 
         // If EG->LFO is currently forcing a protected run, ignore note-off stop for the duration.
@@ -628,6 +651,31 @@ public:
         }
 
         //======================================================================
+        // DELAY CONFIGURATION
+        //======================================================================
+
+
+        modztakt::delay::Params delayParams;
+        delayParams.enabled          = apvts.getRawParameterValue("delayEnabled")->load() > 0.5f;
+        delayIsEnabled.store((bool) delayParams.enabled, std::memory_order_release);
+
+        // NOTE: the Params field is delayTimeMs; APVTS id is "delayRate"
+        delayParams.delayTimeMs = apvts.getRawParameterValue("delayRate")->load();
+        delayParams.feedback    = apvts.getRawParameterValue("feedback")->load();
+
+        // Read output route channels
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const int chChoice = (int) apvts.getRawParameterValue(
+                "delayRoute" + juce::String(r) + "_channel")->load();
+            // chChoice: 0=Disabled, 1..16=Ch1..16  (same mapping as EG routes)
+            delayParams.routeChannels[r] = (chChoice == 0) ? 0 : chChoice;
+        }
+
+        delayEngine.setParams(delayParams);
+
+
+        //======================================================================
         // LFO GENERATION
         //======================================================================
 
@@ -779,6 +827,13 @@ public:
                                                 0);
             }
         }
+
+        // DELAY MIDI OUTPUT
+        // Must run every block (engine advances its internal clock even when idle)
+        delayEngine.processBlock (audio.getNumSamples(), blockStartMs, midi);
+
+        // Advance global time after processing the block
+        timeMs = blockStartMs + blockDurationMs;
 
         // Advance global time after processing the block
         timeMs = blockStartMs + blockDurationMs;
@@ -978,6 +1033,11 @@ private:
 
     bool egWasDrivingLfo = false;  // audio thread only, edge detector for UI
 
+    // Delay
+    modztakt::delay::Engine delayEngine;
+    std::atomic<bool> delayIsEnabled { false };
+
+
     // Throttle state for outgoing MIDI
     std::unordered_map<int, int>    lastSentValuePerParam;
     std::unordered_map<int, double> lastSendTimePerParam;
@@ -1049,10 +1109,6 @@ private:
                 return text.getFloatValue(); // text → value
             }
         ));
-
-        // p.push_back (std::make_unique<juce::AudioParameterFloat>(
-        //     "lfoDepth", "LFO Depth",
-        //     juce::NormalisableRange<float>(0.0f, 1.0f, 0.0f, 1.0f), 1.0f));
 
         // Sync mode: 0=Free, 1=MIDI Clock
         p.push_back (std::make_unique<juce::AudioParameterChoice>(
@@ -1224,6 +1280,50 @@ private:
                 0 
             ));
         }
+
+        // DELAY
+        // Master switch
+        p.push_back (std::make_unique<juce::AudioParameterBool>(
+            "delayEnabled", "Delay Enabled", false));
+
+        // Input note filtering for Delay (0=Disabled, 1..16 channels)
+        p.push_back (std::make_unique<juce::AudioParameterInt>(
+            "delayNoteSourceChannel", "Delay Note Source Channel",
+            1, 16, 1));
+
+        // Delay time  50 ms → 2 000 ms  (sqrt-ish skew so the middle of the
+        // slider sits around 500 ms, matching the slider in DelayEditorComponent)
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "delayRate", "Delay Time",
+            juce::NormalisableRange<float>(50.0f, 2000.0f, 1.0f, 0.45f),
+            500.0f));
+
+        // Feedback  0 → 95 %  (capped below 1.0 to prevent infinite echoes)
+        p.push_back (std::make_unique<juce::AudioParameterFloat>(
+            "feedback", "Feedback",
+            juce::NormalisableRange<float>(0.0f, 0.95f),
+            0.5f));
+
+        // Delay output routes  (one MIDI-channel selector per route)
+        auto makeDelayChannelChoices = []()
+        {
+            juce::StringArray s;
+            s.add ("Disabled");
+            for (int ch = 1; ch <= 16; ++ch)
+                s.add ("Ch " + juce::String (ch));
+            return s;
+        };
+
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            p.push_back (std::make_unique<juce::AudioParameterChoice>(
+                "delayRoute" + juce::String (r) + "_channel",
+                "Delay Route " + juce::String (r) + " Channel",
+                makeDelayChannelChoices(),
+                0  // default: Disabled
+            ));
+        }
+
 
         // SETTINGS MENU PARAMETERS (Performance)
         // MIDI Data Throttle (change threshold in steps)

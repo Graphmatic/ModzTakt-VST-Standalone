@@ -27,6 +27,9 @@
       <FILE id="emDMWr" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
     </GROUP>
     <FILE id="adaQwH" name="Cosmetic.h" compile="0" resource="0" file="Source/Cosmetic.h"/>
+    <FILE id="zKShmX" name="DelayEditorComponent.h" compile="0" resource="0"
+          file="Source/DelayEditorComponent.h"/>
+    <FILE id="fpAuoQ" name="DelayEngine.h" compile="0" resource="0" file="Source/DelayEngine.h"/>
     <FILE id="mqlfvT" name="EnvelopeEditorComponent.h" compile="0" resource="0"
           file="Source/EnvelopeEditorComponent.h"/>
     <FILE id="SyJmvR" name="EnvelopeEngine.h" compile="0" resource="0"
