@@ -155,21 +155,27 @@ public:
         addAndMakeVisible(rateLabel);
         
         addAndMakeVisible(rateSlider);
-        rateSlider.setRange(0.1, 20.0, 0.01);
+        rateSlider.setRange(0.1, 40.0, 0.01);
         rateSlider.setValue(2.0);
         rateSlider.setTextValueSuffix(" Hz");
         rateSlider.setLookAndFeel(&lookGreen);
+        rateSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+        rateSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 80, 24);
         rateSlider.setNumDecimalPlacesToDisplay(2);
+        
         // apvts
         rateAttach = std::make_unique<SliderAttachment>(apvts, "lfoRateHz", rateSlider);
 
         // Depth
         depthLabel.setText("Depth:", juce::dontSendNotification);
         addAndMakeVisible(depthLabel);
+
         addAndMakeVisible(depthSlider);
         depthSlider.setRange(0.0, 1.0, 0.01);
         depthSlider.setValue(1.0);
         depthSlider.setLookAndFeel(&lookPurple);
+        depthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+        depthSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 80, 24);
         depthSlider.setNumDecimalPlacesToDisplay(2);
         // apvts
         depthAttach = std::make_unique<SliderAttachment>(apvts, "lfoDepth", depthSlider);
@@ -439,7 +445,7 @@ public:
             juce::PopupMenu throttleSub;
             juce::PopupMenu limiterSub;
             
-            // Get current indices from APVTS (FIXED)
+            // Get current indices from APVTS
             int currentThrottleIndex = 0;
             int currentLimiterIndex = 0;
             
@@ -449,7 +455,7 @@ public:
             if (auto* limiterParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midiRateLimiter")))
                 currentLimiterIndex = limiterParam->getIndex();
             
-            // Build menus (unchanged)
+            // Build menus
             throttleSub.addItem(1, "Off (send every change)", true, currentThrottleIndex == 0);
             throttleSub.addItem(2, "1 step (fine)",           true, currentThrottleIndex == 1);
             throttleSub.addItem(3, "2 steps",                 true, currentThrottleIndex == 2);
@@ -473,7 +479,7 @@ public:
             menu.showMenuAsync(juce::PopupMenu::Options(),
                 [this](int result)
                 {
-                    // Update APVTS parameters (FIXED)
+                    // Update APVTS parameters
                     if (result >= 1 && result <= 5)
                     {
                         const int index = result - 1;
@@ -707,8 +713,17 @@ public:
 
         lfoAreaContent.removeFromTop(6);
 
-        placeRow(rateLabel, rateSlider);
-        placeRow(depthLabel, depthSlider);
+        auto placeRateDepthRow = [&](juce::Label& label, juce::Component& comp)
+        {
+            auto row = lfoAreaContent.removeFromTop(rowHeight);
+            label.setBounds(row.removeFromLeft(60));
+            row.removeFromLeft(spacing);
+            comp.setBounds(row);
+            lfoAreaContent.removeFromTop(10);
+        };
+
+        placeRateDepthRow(rateLabel, rateSlider);
+        placeRateDepthRow(depthLabel, depthSlider);
 
         lfoAreaContent.removeFromTop(10);
         startButton.setBounds(lfoAreaContent.removeFromTop(40));
@@ -1026,9 +1041,6 @@ private:
                 p->endChangeGesture();
             }
         }
-
-        // const bool on = processor.getAPVTS().getRawParameterValue("lfoActive")->load() > 0.5f;
-        // startButton.setButtonText(on ? "Stop LFO" : "Start LFO");
 
         if (processor.uiRequestSetRateHz.exchange(false, std::memory_order_acq_rel))
         {

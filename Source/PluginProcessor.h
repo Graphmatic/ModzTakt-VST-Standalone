@@ -753,7 +753,6 @@ public:
         }
 
         // EG MIDI OUTPUT
-
         if (egHasValue)
         {
            #if JUCE_DEBUG
@@ -1019,12 +1018,41 @@ private:
             juce::StringArray{ "Sine", "Triangle", "Square", "Saw", "Random" }, 0)); // 0..4
 
         p.push_back (std::make_unique<juce::AudioParameterFloat>(
-            "lfoRateHz", "LFO Rate",
-            juce::NormalisableRange<float>(0.01f, 40.0f, 0.0f, 0.5f), 1.0f));
+            "lfoRateHz",
+            "LFO Rate",
+            juce::NormalisableRange<float>(0.01f, 40.0f, 0.01f, 0.5f),
+            1.0f,
+            "Hz",
+            juce::AudioProcessorParameter::genericParameter,
+            [](float v, int)
+            {
+                return juce::String(v, 2);   // value → text
+            },
+            [](const juce::String& text)
+            {
+                return text.getFloatValue(); // text → value
+            }
+        ));
 
         p.push_back (std::make_unique<juce::AudioParameterFloat>(
             "lfoDepth", "LFO Depth",
-            juce::NormalisableRange<float>(0.0f, 1.0f, 0.0f, 1.0f), 1.0f));
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.0f, 1.0f),
+            1.0f,
+            "",
+            juce::AudioProcessorParameter::genericParameter,
+            [](float v, int)
+            {
+                return juce::String(v, 2);   // value → text
+            },
+            [](const juce::String& text)
+            {
+                return text.getFloatValue(); // text → value
+            }
+        ));
+
+        // p.push_back (std::make_unique<juce::AudioParameterFloat>(
+        //     "lfoDepth", "LFO Depth",
+        //     juce::NormalisableRange<float>(0.0f, 1.0f, 0.0f, 1.0f), 1.0f));
 
         // Sync mode: 0=Free, 1=MIDI Clock
         p.push_back (std::make_unique<juce::AudioParameterChoice>(

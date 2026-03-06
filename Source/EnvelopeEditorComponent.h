@@ -57,7 +57,7 @@ public:
         {
             const auto rs = juce::String(r);
 
-            egRouteChannelLabel[r].setText("Route " + juce::String(r+1) + " Ch", juce::dontSendNotification);
+            egRouteChannelLabel[r].setText("Route " + juce::String(r+1), juce::dontSendNotification);
             addAndMakeVisible(egRouteChannelLabel[r]);
 
             addAndMakeVisible(egRouteChannelBox[r]);
@@ -70,7 +70,7 @@ public:
                 apvts, "egRoute" + rs + "_channel", egRouteChannelBox[r]
             );
 
-            egRouteDestLabel[r].setText("Route " + juce::String(r+1) + " Dest", juce::dontSendNotification);
+            egRouteDestLabel[r].setText("Dest. CC", juce::dontSendNotification);
             addAndMakeVisible(egRouteDestLabel[r]);
 
             addAndMakeVisible(egRouteDestBox[r]);
@@ -329,8 +329,8 @@ public:
 
         juce::FlexBox attackOptions;
         attackOptions.flexDirection = juce::FlexBox::Direction::row;
-        attackOptions.alignItems    = juce::FlexBox::AlignItems::flexStart;
-        attackOptions.justifyContent= juce::FlexBox::JustifyContent::flexStart;
+        attackOptions.alignItems    = juce::FlexBox::AlignItems::center;
+        attackOptions.justifyContent= juce::FlexBox::JustifyContent::center;
 
         attackOptions.items.add(juce::FlexItem(*attackSnap)
                                                 .withWidth(22)
@@ -359,11 +359,11 @@ public:
 
         attackOptions.performLayout(attackOptionsRow);
 
-        content.removeFromTop(15);
+        content.removeFromTop(20);
 
         placeRow(holdLabel, holdSlider);
 
-        content.removeFromTop(15);
+        content.removeFromTop(20);
 
         placeRow(decayLabel, decaySlider);
 
@@ -371,8 +371,8 @@ public:
 
         juce::FlexBox decayCurveBox;
         decayCurveBox.flexDirection  = juce::FlexBox::Direction::row;
-        decayCurveBox.alignItems     = juce::FlexBox::AlignItems::flexStart;
-        decayCurveBox.justifyContent = juce::FlexBox::JustifyContent::flexStart;
+        decayCurveBox.alignItems     = juce::FlexBox::AlignItems::center;
+        decayCurveBox.justifyContent = juce::FlexBox::JustifyContent::center;
 
         decayCurveBox.items.add(juce::FlexItem(*decayLinear)
                                                 .withWidth(22)
@@ -401,11 +401,11 @@ public:
 
         decayCurveBox.performLayout(decayCurveRow);
 
-        content.removeFromTop(15);
+        content.removeFromTop(20);
 
         placeRow(sustainLabel, sustainSlider);
 
-        content.removeFromTop(15);
+        content.removeFromTop(20);
 
         placeRow(releaseLabel, releaseSlider);
 
@@ -413,8 +413,8 @@ public:
 
         juce::FlexBox releaseCurveBox;
         releaseCurveBox.flexDirection  = juce::FlexBox::Direction::row;
-        releaseCurveBox.alignItems     = juce::FlexBox::AlignItems::flexStart;
-        releaseCurveBox.justifyContent = juce::FlexBox::JustifyContent::flexStart;
+        releaseCurveBox.alignItems     = juce::FlexBox::AlignItems::center;
+        releaseCurveBox.justifyContent = juce::FlexBox::JustifyContent::center;
 
         releaseCurveBox.items.add(juce::FlexItem(*releaseLinear)
                                                     .withWidth(22)
@@ -451,16 +451,13 @@ public:
 
         releaseCurveBox.performLayout(releaseCurveRow);
 
-        content.removeFromTop(20);
+        content.removeFromTop(24);
 
         placeRow(velocityAmountLabel, velocityAmountSlider);
 
-        content.removeFromTop(40);
+        content.removeFromTop(20);
 
-        // EG routes
-        const int gap = 6;
-
-        // EG to LFO  egToLfoDepth
+        // EG to LFO
         auto egToLfoRow = content.removeFromTop(rowHeight + 4);
 
         juce::FlexBox egToLfoBox;
@@ -487,34 +484,34 @@ public:
 
         egToLfoBox.performLayout(egToLfoRow);
 
-        content.removeFromTop(20);
+        content.removeFromTop(18);
 
-
+        // EG routes
         auto layoutRouteRow = [&](juce::Rectangle<int> row, int r)
         {
             juce::FlexBox fb;
             fb.flexDirection  = juce::FlexBox::Direction::row;
             fb.alignItems     = juce::FlexBox::AlignItems::center;
-            fb.justifyContent = juce::FlexBox::JustifyContent::flexStart;
+            fb.justifyContent = juce::FlexBox::JustifyContent::center;
 
-            const float labelW     = 78.0f;
+            const float labelW     = 64.0f;
             const float chanW      = 90.0f;
-            const float destLabelW = 86.0f;
+            const float destLabelW = 64.0f;
 
             fb.items.add(juce::FlexItem(egRouteChannelLabel[r]).withWidth(labelW).withHeight((float)rowHeight));
             fb.items.add(juce::FlexItem(egRouteChannelBox[r]).withWidth(chanW).withHeight((float)rowHeight)
-                            .withMargin({ 0, gap, 0, 0 }));
+                            .withMargin({ 0, 16, 0, 0 }));
 
             fb.items.add(juce::FlexItem(egRouteDestLabel[r]).withWidth(destLabelW).withHeight((float)rowHeight)
-                            .withMargin({ 0, gap, 0, 0 }));
+                            .withMargin({ 0, 8, 0, 0 }));
 
             fb.items.add(juce::FlexItem(egRouteDestBox[r]).withFlex(1.0f).withHeight((float)rowHeight)
-                            .withMargin({ 0, gap, 0, 0 }));
+                            .withMargin({ 0, 8, 0, 0 }));
 
             fb.performLayout(row.toFloat());
         };
 
-        const int routesHeight = (rowHeight + gap) * maxRoutes - gap;
+        const int routesHeight = (rowHeight + 8) * maxRoutes - 8;
 
         if (content.getHeight() > routesHeight + 10)
             content.removeFromBottom(10);
@@ -525,7 +522,7 @@ public:
         {
             auto row = routesArea.removeFromTop(rowHeight);
             layoutRouteRow(row, r);
-            routesArea.removeFromTop(gap);
+            routesArea.removeFromTop(8);
         }
     }
 
