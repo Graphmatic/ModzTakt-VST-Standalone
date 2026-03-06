@@ -12,6 +12,11 @@ A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or othe
 -- "Long" mode for Attack and Release (for pads and texture)
 -- EG can also modulate LFO depth or/and rate
 
+
+- a MIDI notes delay with routing to up to 3 MIDI channels.
+-- Delay can be synced to MIDI clock
+-- Per channel transpose function
+
 - the Oscilloscope view is gadget, not accurate.
 
 LFO route triggered by EG always run until end of EG cycle.
