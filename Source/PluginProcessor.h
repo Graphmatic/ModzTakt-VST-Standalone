@@ -654,21 +654,29 @@ public:
         // DELAY CONFIGURATION
         //======================================================================
 
-
         modztakt::delay::Params delayParams;
         delayParams.enabled          = apvts.getRawParameterValue("delayEnabled")->load() > 0.5f;
         delayIsEnabled.store((bool) delayParams.enabled, std::memory_order_release);
 
         // NOTE: the Params field is delayTimeMs; APVTS id is "delayRate"
         delayParams.delayTimeMs = apvts.getRawParameterValue("delayRate")->load();
-        delayParams.feedback    = apvts.getRawParameterValue("feedback")->load();
+        delayParams.feedback  = apvts.getRawParameterValue("feedback")->load();
 
-        // Read output route channels
+        // Sync override: delaySyncDivision choice index 0 = Free, 1..8 = divisions.
+        // Uses the same `bpm` and `syncEnabled` variables already computed above for the LFO.
+        // If no clock is running (bpm == 0 or syncEnabled == false) the slider value is kept.
+        const int delaySyncDivIdx = (int) apvts.getRawParameterValue("delaySyncDivision")->load();
+        if (delaySyncDivIdx > 0 && syncEnabled && bpm > 0.0)
+        {
+            // divisionId is 1-based inside DelayEngine, matching choice index directly.
+            delayParams.delayTimeMs = (float) modztakt::delay::divisionToMs(bpm, delaySyncDivIdx);
+        }
+
+        // Read output route channels (0 = Disabled, 1..16 = Ch1..Ch16).
         for (int r = 0; r < maxRoutes; ++r)
         {
             const int chChoice = (int) apvts.getRawParameterValue(
                 "delayRoute" + juce::String(r) + "_channel")->load();
-            // chChoice: 0=Disabled, 1..16=Ch1..16  (same mapping as EG routes)
             delayParams.routeChannels[r] = (chChoice == 0) ? 0 : chChoice;
         }
 
@@ -835,8 +843,6 @@ public:
         // Advance global time after processing the block
         timeMs = blockStartMs + blockDurationMs;
 
-        // Advance global time after processing the block
-        timeMs = blockStartMs + blockDurationMs;
     }
 
     //==============================================================================
@@ -1290,6 +1296,16 @@ private:
         p.push_back (std::make_unique<juce::AudioParameterInt>(
             "delayNoteSourceChannel", "Delay Note Source Channel",
             1, 16, 1));
+
+        // Delay sync division  (0 = Free → use slider, 1..8 = BPM-locked intervals)
+        // Mirrors the LFO syncDivision choices, with "Free" prepended.
+        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+            "delaySyncDivision", "Delay Sync Division",
+            juce::StringArray { "Free",
+                                "1/1", "1/2", "1/4", "1/8", "1/16", "1/32",
+                                "1/8 dot", "1/16 dot" },
+            0  // default: Free
+        ));
 
         // Delay time  50 ms → 2 000 ms  (sqrt-ish skew so the middle of the
         // slider sits around 500 ms, matching the slider in DelayEditorComponent)

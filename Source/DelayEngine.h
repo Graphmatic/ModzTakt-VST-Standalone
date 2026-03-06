@@ -10,6 +10,47 @@ namespace modztakt::delay
     static constexpr int maxDelayRoutes = 3;
 
     // ─────────────────────────────────────────────────────────────────────────
+    // BPM sync helper
+    //
+    //   divisionId  1-based index matching the "delaySyncDivision" APVTS choice
+    //               offset by 1  (choice index 0 = "Free" = not synced).
+    //
+    //   Division mapping (mirrors LFO syncDivision):
+    //     1 = 1/1        4 beats
+    //     2 = 1/2        2 beats
+    //     3 = 1/4        1 beat   (quarter note)
+    //     4 = 1/8        0.5 beats
+    //     5 = 1/16       0.25 beats
+    //     6 = 1/32       0.125 beats
+    //     7 = 1/8 dot    0.75 beats
+    //     8 = 1/16 dot   0.375 beats
+    //
+    //   Returns the delay interval in milliseconds, clamped to [10, 10000].
+    // ─────────────────────────────────────────────────────────────────────────
+    inline double divisionToMs (double bpm, int divisionId) noexcept
+    {
+        if (bpm <= 0.0) return 500.0;
+
+        const double beatMs = 60000.0 / bpm; // duration of one quarter-note in ms
+
+        double beats = 1.0;
+        switch (divisionId)
+        {
+            case 1:  beats = 4.0;     break; // 1/1
+            case 2:  beats = 2.0;     break; // 1/2
+            case 3:  beats = 1.0;     break; // 1/4
+            case 4:  beats = 0.5;     break; // 1/8
+            case 5:  beats = 0.25;    break; // 1/16
+            case 6:  beats = 0.125;   break; // 1/32
+            case 7:  beats = 0.75;    break; // 1/8 dotted
+            case 8:  beats = 0.375;   break; // 1/16 dotted
+            default: beats = 1.0;     break;
+        }
+
+        return juce::jlimit (10.0, 10000.0, beatMs * beats);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Params – filled each processBlock() from APVTS, then handed to the engine.
     // ─────────────────────────────────────────────────────────────────────────
     struct Params

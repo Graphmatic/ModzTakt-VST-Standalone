@@ -54,6 +54,27 @@ public:
         noteSourceDelayChannelAttach = std::make_unique<ChoiceAttachment> (
             apvts, "delayNoteSourceChannel", noteSourceDelayChannelBox);
 
+        // ── Delay Sync combobox ───────────────────────────────────────────────
+        // "Free" means use the slider value; any other choice locks the delay
+        // time to a BPM-derived interval (requires an active clock source).
+        delaySyncLabel.setText ("Sync", juce::dontSendNotification);
+        delaySyncLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible (delaySyncLabel);
+
+        addAndMakeVisible (delaySyncBox);
+        delaySyncBox.addItem ("Free",       1);
+        delaySyncBox.addItem ("1/1",        2);
+        delaySyncBox.addItem ("1/2",        3);
+        delaySyncBox.addItem ("1/4",        4);
+        delaySyncBox.addItem ("1/8",        5);
+        delaySyncBox.addItem ("1/16",       6);
+        delaySyncBox.addItem ("1/32",       7);
+        delaySyncBox.addItem ("1/8 dot",    8);
+        delaySyncBox.addItem ("1/16 dot",   9);
+
+        delaySyncAttach = std::make_unique<ChoiceAttachment> (
+            apvts, "delaySyncDivision", delaySyncBox);
+
         // ── Delay Rate slider ─────────────────────────────────────────────────
         // Create the APVTS attachment first (it sets the slider range from the param).
         delayRateAttach = std::make_unique<SliderAttachment> (apvts, "delayRate",
@@ -97,6 +118,7 @@ public:
         // Reset all APVTS attachments before components are destroyed.
         delayEnableAttach.reset();
         noteSourceDelayChannelAttach.reset();
+        delaySyncAttach.reset();
         delayRateAttach.reset();
         feedbackAttach.reset();
         for (int r = 0; r < maxRoutes; ++r)
@@ -149,6 +171,9 @@ public:
         // ── Note Source channel ───────────────────────────────────────────────
         placeRow (noteSourceDelayChannelLabel, noteSourceDelayChannelBox);
 
+        // ── Sync division ─────────────────────────────────────────────────────
+        placeRow (delaySyncLabel, delaySyncBox);
+
         content.removeFromTop (10);
 
         // ── Sliders ───────────────────────────────────────────────────────────
@@ -200,17 +225,27 @@ private:
     {
         const bool enabled = apvts.getRawParameterValue ("delayEnabled")->load() > 0.5f;
 
+        // "delaySyncDivision" choice index: 0 = Free, 1..8 = synced divisions.
+        const bool synced =
+            (int) apvts.getRawParameterValue ("delaySyncDivision")->load() > 0;
+
         // Master toggle always stays interactive.
         if (delayEnable)
             delayEnable->setEnabled (true);
 
-        // Gate everything else.
+        // Gate everything else on the master enabled flag.
         noteSourceDelayChannelBox.setEnabled (enabled);
         noteSourceDelayChannelLabel.setEnabled (enabled);
-        delayRateSlider.setEnabled (enabled);
-        delayRateLabel.setEnabled (enabled);
+        delaySyncBox.setEnabled (enabled);
+        delaySyncLabel.setEnabled (enabled);
         feedbackSlider.setEnabled (enabled);
         feedbackLabel.setEnabled (enabled);
+
+        // The rate slider is only interactive when the module is enabled AND
+        // not locked to a sync division.
+        const bool rateEditable = enabled && !synced;
+        delayRateSlider.setEnabled (rateEditable);
+        delayRateLabel.setEnabled (rateEditable);
 
         for (int r = 0; r < maxRoutes; ++r)
         {
@@ -219,9 +254,14 @@ private:
         }
 
         // Visual alpha fade.
-        const float a = enabled ? 1.0f : 0.45f;
+        const float a      = enabled ? 1.0f : 0.45f;
+        const float aRate  = rateEditable ? 1.0f : 0.40f;  // extra dim when overridden by sync
+
         noteSourceDelayChannelBox.setAlpha (a);
-        delayRateSlider.setAlpha (a);
+        delaySyncBox.setAlpha (a);
+        delaySyncLabel.setAlpha (enabled ? 1.0f : 0.60f);
+        delayRateSlider.setAlpha (aRate);
+        delayRateLabel.setAlpha (aRate);
         feedbackSlider.setAlpha (a);
 
         for (int r = 0; r < maxRoutes; ++r)
@@ -297,6 +337,11 @@ private:
     juce::Label    noteSourceDelayChannelLabel;
     juce::ComboBox noteSourceDelayChannelBox;
     std::unique_ptr<ChoiceAttachment> noteSourceDelayChannelAttach;
+
+    // Sync division combobox (Free / 1/1 … 1/16 dotted)
+    juce::Label    delaySyncLabel;
+    juce::ComboBox delaySyncBox;
+    std::unique_ptr<ChoiceAttachment> delaySyncAttach;
 
     // Sliders
     juce::Slider delayRateSlider, feedbackSlider;
