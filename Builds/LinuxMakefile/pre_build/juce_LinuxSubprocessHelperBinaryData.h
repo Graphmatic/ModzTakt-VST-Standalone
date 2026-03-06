@@ -5,6 +5,6 @@
 namespace LinuxSubprocessHelperBinaryData
 {
     extern const char*  juce_linux_subprocess_helper;
-    const int           juce_linux_subprocess_helperSize = 17544;
+    const int           juce_linux_subprocess_helperSize = 17552;
 }
 
