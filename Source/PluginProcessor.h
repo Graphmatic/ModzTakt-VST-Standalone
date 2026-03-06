@@ -254,8 +254,6 @@ public:
         {
             int channel = 0;        // 0=disabled
             int destChoice = 0;     // APVTS choice index
-            bool toLfoDepth = false;
-            int toLfoRate = false;
         };
 
         std::array<EgRouteRuntime, maxRoutes> egRoutesRt {};
@@ -266,15 +264,19 @@ public:
         {
             const auto rs = juce::String(r);
 
-            const int chChoice = (int) apvts.getRawParameterValue("egRoute" + rs + "_channel")->load(); // 0..16 (Choice index)
-            const int ch = (chChoice == 0 ? 0 : chChoice); // 0=Disabled, else 1..16
+            const int chChoice = (int) apvts.getRawParameterValue("egRoute" + rs + "_channel")->load();
+            int ch = 0;  // 0=Disabled, -1=LFO, 1..16=MIDI channels
 
-            const int destChoice = (int) apvts.getRawParameterValue("egRoute" + rs + "_dest")->load(); // 0..N-1
+            if (chChoice == 0)      ch = 0;   // Disabled
+            else                    ch = chChoice ;  // Ch 1..16 (choices 2..17 → 1..16)
 
-            const bool toLfoDepth = (destChoice == egMidiDestCount + 1);
-            const bool toLfoRate = (destChoice == egMidiDestCount + 2);
+            int destChoice = (int) apvts.getRawParameterValue("egRoute" + rs + "_dest")->load(); // master index
 
-            egRoutesRt[r] = { ch, destChoice, toLfoDepth, toLfoRate };
+            // ALSO sanitize MIDI range to avoid out-of-bounds if automation wrote LFO indices:
+            const int midiCount = (int)SyntaktParameterEgIndex.size();
+            destChoice = juce::jlimit(0, midiCount - 1, destChoice);
+
+            egRoutesRt[r] = { ch, destChoice };
         }
 
         // automation safety: enforce EG route exclusivity deterministically
@@ -289,82 +291,42 @@ public:
             auto& cur = egRoutesRt[r];
             if (cur.channel == 0) continue;
 
-            if (cur.toLfoDepth || cur.toLfoRate)
+            const int globalParamIdx = SyntaktParameterEgIndex[cur.destChoice];
+
+            // conflict with LFO (same ch + same global param)
+            bool conflictLfo = false;
+            for (int lr = 0; lr < maxRoutes; ++lr)
             {
-                // internal destination uniqueness - only one route can target each LFO param
-                for (int j = 0; j < r; ++j)
+                if (lfoRoutes[lr].midiChannel == cur.channel && lfoRoutes[lr].parameterIndex == globalParamIdx)
                 {
-                    if (egRoutesRt[j].channel == 0) continue;
-                    
-                    // Check for duplicate depth target
-                    if (cur.toLfoDepth && egRoutesRt[j].toLfoDepth)
-                    {
-                        cur.channel = 0; // disable later one
-                        break;
-                    }
-                    
-                    // Check for duplicate rate target
-                    if (cur.toLfoRate && egRoutesRt[j].toLfoRate)
-                    {
-                        cur.channel = 0; // disable later one
-                        break;
-                    }
+                    conflictLfo = true;
+                    break;
                 }
             }
-            else
+            if (conflictLfo)
             {
-                const int globalParamIdx = SyntaktParameterEgIndex[cur.destChoice];
+                cur.channel = 0;
+                continue;
+            }
 
-                // conflict with LFO (same ch + same global param)
-                bool conflictLfo = false;
-                for (int lr = 0; lr < maxRoutes; ++lr)
-                {
-                    if (lfoRoutes[lr].midiChannel == cur.channel && lfoRoutes[lr].parameterIndex == globalParamIdx)
-                    {
-                        conflictLfo = true;
-                        break;
-                    }
-                }
-                if (conflictLfo)
+            // conflict with earlier EG routes (same ch + same global param)
+            for (int j = 0; j < r; ++j)
+            {
+                const auto& prev = egRoutesRt[j];
+                if (prev.channel == 0) continue;
+
+                const int prevGlobalParam = SyntaktParameterEgIndex[prev.destChoice];
+                if (prev.channel == cur.channel && prevGlobalParam == globalParamIdx)
                 {
                     cur.channel = 0;
-                    continue;
-                }
-
-                // conflict with earlier EG routes (same ch + same global param)
-                for (int j = 0; j < r; ++j)
-                {
-                    const auto& prev = egRoutesRt[j];
-                    if (prev.channel == 0 || prev.toLfoDepth || prev.toLfoRate) continue;
-
-                    const int prevGlobalParam = SyntaktParameterEgIndex[prev.destChoice];
-                    if (prev.channel == cur.channel && prevGlobalParam == globalParamIdx)
-                    {
-                        cur.channel = 0;
-                        break;
-                    }
+                    break;
                 }
             }
         }
 
         // --- EG -> LFO routing map (per block, from EG routes selection) ---
-        bool egToLfoDepthActive = false;
-        bool egToLfoRateActive = false;
-
-        if (egParams.enabled)
-        {
-            for (int r = 0; r < maxRoutes; ++r)
-            {
-                const auto& er = egRoutesRt[r];
-                if (er.channel == 0) continue;
-
-                if (er.toLfoDepth)
-                    egToLfoDepthActive = true;
-                
-                if (er.toLfoRate)
-                    egToLfoRateActive = true;
-            }
-        }
+        bool egToLfoDepthActive = apvts.getRawParameterValue("egToLfoDepth")->load() > 0.5f;
+        bool egToLfoRateActive = apvts.getRawParameterValue("egToLfoRate")->load() > 0.5f;
 
         // scope view
         bool scopeOn = apvts.getRawParameterValue("scope")->load() > 0.5f;
@@ -596,9 +558,7 @@ public:
 
         egWasForcingLfo = lfoForcedActiveByEg;
 
-
         // CONSOLIDATE ALL CONDITIONS AND DETERMINE LFO STATE
-
         LfoRunIntent intent;
         intent.userButtonOn = lfoActiveParam;
         intent.userExplicitStop = userExplicitStop;
@@ -793,7 +753,7 @@ public:
         }
 
         // EG MIDI OUTPUT
-        
+
         if (egHasValue)
         {
            #if JUCE_DEBUG
@@ -805,7 +765,6 @@ public:
             {
                 const auto& er = egRoutesRt[r];
                 if (er.channel == 0) continue;
-                if (er.toLfoDepth || er.toLfoRate) continue; // internal LFO modulation, no MIDI send
 
                 const int globalParamIdx = SyntaktParameterEgIndex[er.destChoice];
                 const int egValue = mapEgToMidi(eg01, globalParamIdx);
@@ -936,6 +895,18 @@ public:
     inline double getSampleRateCached() const noexcept { return cachedSampleRate; }
     inline int    getBlockSizeCached()  const noexcept { return cachedBlockSize; }
 
+    // EG filtered destinations (MIDI-capable only)
+    static inline juce::Array<int> SyntaktParameterEgIndex = []()
+    {
+        juce::Array<int> indices;
+        for (int i = 0; i < (int) juce::numElementsInArray(syntaktParameters); ++i)
+            if (syntaktParameters[i].egDestination)
+                indices.add(i);
+        return indices;
+    }();
+
+    static inline int egMidiDestCount() { return SyntaktParameterEgIndex.size(); }
+
     //==============================================================================
     // PRIVATE IMPLEMENTATION
     //==============================================================================
@@ -1016,18 +987,6 @@ private:
     std::array<std::atomic<float>, maxRoutes> scopeValues { 0.0f, 0.0f, 0.0f };
     std::array<std::atomic<bool>,  maxRoutes> scopeRoutesEnabled { false, false, false };
 
-    // EG filtered destinations
-    static inline juce::Array<int> SyntaktParameterEgIndex = []()
-    {
-        juce::Array<int> indices;
-        for (int i = 0; i < (int) juce::numElementsInArray(syntaktParameters); ++i)
-        {
-            if (syntaktParameters[i].egDestination)
-                indices.add(i);
-        }
-        return indices;
-    }();
-    
     static inline const juce::StringArray SyntaktParameterEG = []()
     {
         juce::StringArray filteredEgDest;
@@ -1036,10 +995,6 @@ private:
             if (syntaktParameters[i].egDestination)
                 filteredEgDest.add(syntaktParameters[i].name);
         }
-        filteredEgDest.add("EG to LFO Route 1");
-        filteredEgDest.add("EG to LFO Route 2");
-        filteredEgDest.add("EG to LFO Route 3");
-
         return filteredEgDest;
     }();
     
@@ -1206,10 +1161,15 @@ private:
             1, 16, 1));
 
         // EG ROUTES (maxEGRoutes)
+
+        p.push_back (std::make_unique<juce::AudioParameterBool>("egToLfoDepth", "EG to LFO Depth", false));
+        p.push_back (std::make_unique<juce::AudioParameterBool>("egToLfoRate", "EG to LFO Rate", false));
+
         auto makeEGChannelChoices = []()
         {
             juce::StringArray s;
             s.add("Disabled");
+            // s.add("LFO");
             for (int ch = 1; ch <= 16; ++ch)
                 s.add("Ch " + juce::String(ch));
             return s;
@@ -1227,12 +1187,13 @@ private:
                 0   // default: all eg routes Disabled
             ));
 
-            // Destination choice: uses SyntaktParameterEG (EG destinations + "EG to LFO Depth / to LFO Rate)
+            // Destination choice is Ch_x: uses SyntaktParameterEG (EG destinations )
+            //ModzTaktAudioProcessor::findFirstEgDestination()
             p.push_back (std::make_unique<juce::AudioParameterChoice>(
                 "egRoute" + rs + "_dest",
                 "EG Route " + rs + " Destination",
                 SyntaktParameterEG,
-                ModzTaktAudioProcessor::findFirstEgDestination()
+                0 
             ));
         }
 
