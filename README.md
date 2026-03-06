@@ -1,19 +1,19 @@
 A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or other synth if you edit MIDI CC routing)
 
+<img width="1001" height="729" alt="Screenshot from 2026-03-06 04-41-00" src="https://github.com/user-attachments/assets/7a470a52-2a39-4c8a-bebb-0e53ff775317" />
 
-- one LFO routable up to 3 MIDI channels (so up to 3 Syntakt tracks can share the same LFO, with independent CC destination for each track).
+
+- one LFO with routing to up to 3 MIDI channels (so up to 3 Syntakt tracks can share the same LFO, with independent CC destination for each track).
 -- LFO can be synced to MIDI clock
 -- Note-On trig/re-trig option / Stop on Note-Off option
 
-- one Envelop Generator with linear/exponential/log curves
+
+- one AHDSR Envelop Generator with linear/exponential/log curves with routing to up to 3 MIDI channels or CCs
 -- "Long" mode for Attack and Release (for pads and texture)
+-- EG can also modulate LFO depth or/and rate
 
-- the Oscilloscope view is a gadget, not accurate at high LFO rates
+- the Oscilloscope view is gadget, not accurate.
 
-- LFO Start/Stop UI button may not reflect LFO running state if EG is set to modulate an LFO route ( EG set to "EG to LFO route_x ): LFO route triggered by EG always run until end of EG cycle.
+LFO route triggered by EG always run until end of EG cycle.
 
-- conflicting modulation pathes may still be possible, I hunt them all unless they sound like a new feature.
-
-Mostly "vibe-coded" with ChatGPT and Claude.ai
-
-
+"vibe-coded" with AI
