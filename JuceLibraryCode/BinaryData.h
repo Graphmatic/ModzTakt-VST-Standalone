@@ -8,6 +8,9 @@
 
 namespace BinaryData
 {
+    extern const char*   graphmatic_300_png;
+    const int            graphmatic_300_pngSize = 80655;
+
     extern const char*   checkbox_off_svg;
     const int            checkbox_off_svgSize = 1172;
 
@@ -36,7 +39,7 @@ namespace BinaryData
     const int            TODO_mdSize = 96;
 
     // Number of elements in the namedResourceList and originalFileNames arrays.
-    const int namedResourceListSize = 9;
+    const int namedResourceListSize = 10;
 
     // Points to the start of a list of resource names.
     extern const char* namedResourceList[];

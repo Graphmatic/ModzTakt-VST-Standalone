@@ -44,7 +44,7 @@ namespace ProjectInfo
 {
     const char* const  projectName    = "ModzTakt";
     const char* const  companyName    = "Sound & Breakfast";
-    const char* const  versionString  = "0.0001";
-    const int          versionNumber  = 0x100;
+    const char* const  versionString  = "0.3";
+    const int          versionNumber  = 0x300;
 }
 #endif
