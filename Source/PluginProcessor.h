@@ -662,6 +662,10 @@ public:
         delayParams.delayTimeMs = apvts.getRawParameterValue("delayRate")->load();
         delayParams.feedback  = apvts.getRawParameterValue("feedback")->load();
 
+        const int delayEgShapeChoice = (int) apvts.getRawParameterValue ("delayEgShape")->load();
+
+        const bool delayEgPerNote = apvts.getRawParameterValue ("delayEgPerNote")->load() > 0.5f;
+
         // Sync override: delaySyncDivision choice index 0 = Free, 1..8 = divisions.
         // Uses the same `bpm` and `syncEnabled` variables already computed above for the LFO.
         // If no clock is running (bpm == 0 or syncEnabled == false) the slider value is kept.
@@ -675,16 +679,31 @@ public:
         // Read output route channels (0 = Disabled, 1..16 = Ch1..Ch16) and transpose.
         for (int r = 0; r < maxRoutes; ++r)
         {
-            const int chChoice = (int) apvts.getRawParameterValue(
-                "delayRoute" + juce::String(r) + "_channel")->load();
+            const int chChoice = (int) apvts.getRawParameterValue("delayRoute" + juce::String(r) + "_channel")->load();
+
             delayParams.routeChannels[r]  = (chChoice == 0) ? 0 : chChoice;
 
-            delayParams.routeTranspose[r] = (int) apvts.getRawParameterValue(
-                "delayRoute" + juce::String(r) + "_transpose")->load();
+            delayParams.routeTranspose[r] = (int) apvts.getRawParameterValue("delayRoute" + juce::String(r) + "_transpose")->load();
         }
 
         delayEngine.setParams(delayParams);
 
+        // Per-note EG: driven by "delayEgPerNote" independently of "delayEgShape",
+        // but only meaningful when a shaping destination is actually selected.
+        // If delayEgShape == 0 (Off) the egPerNoteBtn is hidden in the UI and this
+        // path is skipped so no spurious CC is sent.
+
+        modztakt::delay::Params pne = delayEngine.getParams();
+        pne.perNoteEg = delayEgPerNote && (delayEgShapeChoice > 0);
+            
+        if (pne.perNoteEg)
+        {
+            pne.noteEgParams         = egParams; // copy already-built EG params
+            pne.noteEgParams.enabled = true;     // per-note EG always runs when active
+        }
+        
+        delayEngine.setParams (pne);
+        
 
         //======================================================================
         // LFO GENERATION
@@ -839,8 +858,95 @@ public:
             }
         }
 
+        //======================================================================
+        // EG → DELAY ECHO SHAPING
+        // When delayEgShape > 0 and the EG is producing a value, we send the
+        // current EG level as a CC / NRPN volume message to every MIDI channel
+        // that currently has delay notes sounding.  This shapes the perceived
+        // amplitude envelope of each echo using the Syntakt's own amp-EG input.
+        //
+        // The note-off cap in DelayEngine limits echo duration to 70 % of the
+        // delay interval (or the original note duration if shorter), so the EG
+        // attack + hold + early-decay stages are what naturally get applied —
+        // matching the spirit of "EG shapes the echo, not the whole reverb tail".
+        //======================================================================
+
+        if (delayEgShapeChoice > 0 && !delayEgPerNote && egHasValue && delayParams.enabled)
+        {
+            // Resolve parameter without hardcoding CC numbers: use the same
+            // syntaktParameters[] table entry that the LFO/EG routes use.
+            const int paramIdx = (delayEgShapeChoice == 1)
+                                 ? delayEgVolumeParamIdx    // "Amp: Volume"
+                                 : delayEgTrackLvlParamIdx; // "Track Level"
+
+            const auto& param   = syntaktParameters[paramIdx];
+            const int   egValue = mapEgToMidi (eg01, paramIdx);
+
+            // Ask the engine which channels have notes currently sounding.
+            std::array<bool, 17> soundingChannels {};
+            delayEngine.getActiveSoundingChannels (soundingChannels);
+
+            for (int ch = 1; ch <= 16; ++ch)
+            {
+                if (!soundingChannels[ch])
+                    continue;
+
+                // One throttle-map slot per channel so rate-limiting works per-channel.
+                sendThrottledParamValueToBuffer (midi,
+                                                 DELAY_EG_SHAPE_KEY_BASE + ch,
+                                                 ch,
+                                                 param,
+                                                 egValue,
+                                                 0 /*sampleOffset*/);
+            }
+        }
+
+        //======================================================================
+        // PER-NOTE EG OUTPUT
+        //
+        // When "delayEgPerNote" is true AND a destination is selected, each echo
+        // has its own EG retriggered at its note-on.  We mirror the UI rule:
+        // egPerNoteBtn is only visible when delayEgShape > 0, so the processor
+        // matches by also requiring delayEgShapeChoice > 0 here.
+        //======================================================================
+
+        if (delayEgPerNote && delayEgShapeChoice > 0 && delayParams.enabled)
+        {
+            const auto& pnEgOut = delayEngine.getPerNoteEgOutput();
+
+            if (pnEgOut.hasAnyValue)
+            {
+                const int paramIdx = (delayEgShapeChoice == 1)
+                                 ? delayEgVolumeParamIdx    // "Amp: Volume"
+                                 : delayEgTrackLvlParamIdx; // "Track Level"
+
+                const auto& param   = syntaktParameters[paramIdx];
+
+                for (int ch = 1; ch <= 16; ++ch)
+                {
+                    const float eg01 = pnEgOut.maxEg01[ch];
+                    if (eg01 <= 0.0f)
+                        continue;
+
+                    const int midiVal = mapEgToMidi (static_cast<double> (eg01), paramIdx);
+
+                    // Throttle key range: DELAY_EG_SHAPE_KEY_BASE + 0x20 + ch
+                    // (distinct from the global EG shaping keys at +0x00..+0x10).
+                    sendThrottledParamValueToBuffer (midi,
+                                                     DELAY_EG_SHAPE_KEY_BASE + 0x20 + ch,
+                                                     ch,
+                                                     param,
+                                                     midiVal,
+                                                     0 /*sampleOffset*/);
+                }
+            }
+        }
+
+        //======================================================================
         // DELAY MIDI OUTPUT
         // Must run every block (engine advances its internal clock even when idle)
+        //======================================================================
+
         delayEngine.processBlock (audio.getNumSamples(), blockStartMs, midi);
 
         // Advance global time after processing the block
@@ -1015,9 +1121,13 @@ private:
     // MIDI clock (same class as you used in MainComponent)
     MidiClockHandler midiClock;
 
-    // LFO state
-    static constexpr int EG_ROUTE_KEY = 0x7FFF;  // CLEANED: Named constant for magic number
+    //
+    static constexpr int EG_ROUTE_KEY = 0x7FFF;  // Named constant for magic number
 
+    // Delay EG-shaping uses one throttle slot per MIDI channel (channels 1..16).
+    // Range 0x9001..0x9010 — no overlap with LFO (0..2) or EG routes (0x7FFF..0x8001).
+    static constexpr int DELAY_EG_SHAPE_KEY_BASE = 0x9001;
+    
     std::array<RouteSnapshot, maxRoutes> lastRouteSnapshot {};
 
     std::array<LfoRoute, maxRoutes> lfoRoutes {};
@@ -1027,7 +1137,6 @@ private:
     // we stop the other routes without killing the EG-protected one.
     std::array<bool, maxRoutes> lfoRouteSuppressedByNoteOff { false, false, false };
 
-    //LAST
     bool lfoUiAutoOnByNote = false;   // UI Start was turned ON by noteRestart (not by the user)
     bool lfoUiAutoOnByEg = false;     // UI Start was turned ON by EG forcing
     bool egWasForcingLfo = false;     // previous-block EG forcing state (edge detector)
@@ -1045,6 +1154,28 @@ private:
     // Delay
     modztakt::delay::Engine delayEngine;
     std::atomic<bool> delayIsEnabled { false };
+
+    // Resolved once at class-init time: index into syntaktParameters[] for the two
+    // parameters used by the Delay EG-shaping feature.  Using a name-based lookup
+    // avoids hardcoding CC numbers and automatically picks up NRPN if the table
+    // entry is ever switched to NRPN for higher resolution.
+
+    static inline int findSyntaktParamIndexByName (const char* name) noexcept
+    {
+        for (int i = 0; i < (int) juce::numElementsInArray (syntaktParameters); ++i)
+            if (juce::String (syntaktParameters[i].name) == name)
+                return i;
+        jassertfalse; // entry not found — check spelling against SyntaktParameterTable.h
+        return 0;
+    }
+
+    // "Amp: Volume"  → CC 7 (or NRPN, depending on the table entry)
+    static inline const int delayEgVolumeParamIdx =
+        findSyntaktParamIndexByName ("Knob A"); //("Amp: Volume");
+
+    // "Track Level"  → CC 95 (or NRPN, depending on the table entry)
+    static inline const int delayEgTrackLvlParamIdx =
+        findSyntaktParamIndexByName ("Track Level");
 
 
     // Throttle state for outgoing MIDI
@@ -1322,6 +1453,20 @@ private:
             "feedback", "Feedback",
             juce::NormalisableRange<float>(0.0f, 0.95f),
             0.5f));
+
+        // EG shaping destination for delay echoes.
+        // 0 = Off, 1 = EG Volume ("Amp: Volume"), 2 = EG Track Level ("Track Level").
+        // Independent of the per-note EG flag below.
+        p.push_back (std::make_unique<juce::AudioParameterChoice>(
+            "delayEgShape", "Delay EG Shape",
+            juce::StringArray { "Off", "EG Volume", "EG Track Level" },
+            0   // default: Off
+        ));
+
+        // Per-note EG: each echo retriggers its own embedded EG (reuses main EG params).
+        // Can be active simultaneously with any delayEgShape value — they are orthogonal.
+        p.push_back (std::make_unique<juce::AudioParameterBool>(
+            "delayEgPerNote", "Delay EG Per Note", false));
 
         // Delay output routes  (one MIDI-channel selector per route)
         auto makeDelayChannelChoices = []()

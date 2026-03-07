@@ -5,6 +5,10 @@
 #include <vector>
 #include <cmath>
 
+// The per-note EG embeds modztakt::eg::Engine — same params structure as the
+// main EG, so the user drives both from one set of knobs.
+#include "EnvelopeEngine.h"
+
 namespace modztakt::delay
 {
     static constexpr int maxDelayRoutes = 3;
@@ -61,10 +65,27 @@ namespace modztakt::delay
 
         // Output MIDI channels per route.
         // 0 = Disabled, 1-16 = MIDI channel number.
-        std::array<int, maxDelayRoutes> routeChannels { 0, 0, 0 };
+        std::array<int, maxDelayRoutes> routeChannels  { 0, 0, 0 };
 
         // Semitone transpose applied to echoes per route. Range: -24 .. +24.
         std::array<int, maxDelayRoutes> routeTranspose { 0, 0, 0 };
+
+        // Per-note EG: when true each echo retriggers its own independent EG
+        // using the parameters below (copied from the main EG APVTS params).
+        bool perNoteEg = false;
+        modztakt::eg::Params noteEgParams;
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Per-note EG output — filled each processBlock() when perNoteEg is active.
+    // Processor reads this immediately after processBlock() to send CC.
+    // ─────────────────────────────────────────────────────────────────────────
+    struct PerNoteEgOutput
+    {
+        // Max EG value (0..1) across all echoes currently sounding per channel.
+        // Index 0 is unused; indices 1..16 = MIDI channels.
+        std::array<float, 17> maxEg01 {};
+        bool hasAnyValue = false;
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -74,12 +95,32 @@ namespace modztakt::delay
     {
         int    originalNote = 60;  // raw input note (used for noteOff matching)
         int    note         = 60;  // transposed note sent over MIDI
-        int    velocity     = 64;   // MIDI 1 – 127
-        int    channel      = 1;    // MIDI channel 1 – 16
-        double onTimeMs     = 0.0;  // absolute time to fire note-on
-        double offTimeMs    = 0.0;  // absolute time to fire note-off (patchable)
+        int    velocity     = 64;  // MIDI 1 – 127
+        int    channel      = 1;   // MIDI channel 1 – 16
+        double onTimeMs     = 0.0; // absolute time to fire note-on
+        double offTimeMs    = 0.0; // absolute time to fire note-off (patchable)
         bool   noteOnFired  = false;
         bool   noteOffFired = false;
+
+        // Per-note EG — one independent envelope engine per echo.
+        // Only active when Params::perNoteEg is true.
+        // EG params are copied from the main EG at the moment this echo fires,
+        // so late-arriving echoes pick up any knob changes made between echoes.
+        modztakt::eg::Engine noteEg;
+        bool noteEgStarted = false; // true once noteEg.noteOn() has been called
+
+        // Per-note EG release timing.
+        //
+        // egReleaseStartMs: absolute time at which to call noteEg.noteOff()
+        //   so the EG enters its release stage *before* the MIDI note-off fires.
+        //   Initialised tentatively at note-on (release ends at offTimeMs).
+        //   Patched when the real note-off arrives to reproduce the original
+        //   hold duration; offTimeMs is then extended by releaseMs so the
+        //   MIDI note-off fires only after the release has fully completed.
+        //
+        // egNoteOffFired: prevents double-calling noteEg.noteOff().
+        double egReleaseStartMs = -1.0;
+        bool   egNoteOffFired   = false;
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -168,6 +209,17 @@ namespace modztakt::delay
                     n.offTimeMs    = offMs;
                     n.noteOnFired  = false;
                     n.noteOffFired = false;
+
+                    // Per-note EG: set a tentative release start so the release
+                    // finishes exactly when the MIDI note-off fires.
+                    // If a real note-off arrives later, both values are patched
+                    // in noteOff() to reproduce the original hold duration.
+                    if (params.perNoteEg)
+                    {
+                        const double releaseMs = egReleaseMs (params.noteEgParams);
+                        n.egReleaseStartMs = juce::jmax (onMs, offMs - releaseMs);
+                    }
+
                     scheduledNotes.push_back (n);
                 }
             }
@@ -212,14 +264,31 @@ namespace modztakt::delay
                 if (n.originalNote != note || n.noteOffFired)
                     continue;
 
-                // Recompute offTimeMs relative to this echo's own note-on time,
-                // so each echo in the chain keeps the correct phasing.
-                n.offTimeMs = n.onTimeMs + echoDurMs;
+                if (params.perNoteEg)
+                {
+                    // Reproduce the original hold duration on each echo:
+                    //   egReleaseStartMs = echo note-on  +  min(inputDur, 70% delayInterval)
+                    // Then extend offTimeMs so the MIDI note-off fires only AFTER the
+                    // release stage has had time to complete fully.
+                    const double holdDurMs = echoDurMs; // same cap as the non-EG path
+                    n.egReleaseStartMs = n.onTimeMs + holdDurMs;
+                    n.offTimeMs        = n.egReleaseStartMs + egReleaseMs (params.noteEgParams);
+                }
+                else
+                {
+                    // Recompute offTimeMs relative to this echo's own note-on time,
+                    // so each echo in the chain keeps the correct phasing.
+                    n.offTimeMs = n.onTimeMs + echoDurMs;
+                }
             }
         }
 
         // ── Called every processBlock to flush due events into the output buffer.
         //    Pass the same `midi` buffer that LFO / EG already write into.
+        //
+        //    When Params::perNoteEg is true, each echo retriggers its own embedded
+        //    EG.  After this call, read getPerNoteEgOutput() to obtain the max EG
+        //    value per MIDI channel (use it to send a volume CC from the processor).
         // ─────────────────────────────────────────────────────────────────────
         void processBlock (int               numSamples,
                            double            blockStartMs,
@@ -229,8 +298,12 @@ namespace modztakt::delay
             {
                 scheduledNotes.clear();
                 noteOnTimes.clear();
+                perNoteEgOutput = {};
                 return;
             }
+
+            // Reset per-note EG accumulator for this block.
+            perNoteEgOutput = {};
 
             const double blockEndMs = blockStartMs
                                     + static_cast<double> (numSamples) * msPerSample;
@@ -247,6 +320,18 @@ namespace modztakt::delay
                                                    static_cast<juce::uint8> (n.velocity)),
                         offset);
                     n.noteOnFired = true;
+
+                    // ── Start per-note EG ────────────────────────────────────
+                    // EG params are captured NOW (block-boundary accuracy), so
+                    // consecutive echoes each pick up the current knob settings.
+                    if (params.perNoteEg)
+                    {
+                        n.noteEg.setSampleRate (sampleRate);
+                        n.noteEg.setParams (params.noteEgParams);
+                        n.noteEg.reset();
+                        n.noteEg.noteOn (static_cast<float> (n.velocity) / 127.0f);
+                        n.noteEgStarted = true;
+                    }
                 }
 
                 // ── Note-off ────────────────────────────────────────────────
@@ -258,6 +343,53 @@ namespace modztakt::delay
                         juce::MidiMessage::noteOff (n.channel, n.note),
                         offset);
                     n.noteOffFired = true;
+
+                    // Fallback: if the real note-off never arrived (tentative duration
+                    // expired) and we haven't triggered the EG release yet, do it now.
+                    // In the normal perNoteEg path this has already been called earlier
+                    // via egReleaseStartMs, so egNoteOffFired will be true here.
+                    if (params.perNoteEg && n.noteEgStarted && !n.egNoteOffFired)
+                    {
+                        n.noteEg.noteOff();
+                        n.egNoteOffFired = true;
+                    }
+                }
+            }
+
+            // ── Advance per-note EGs and accumulate max per channel ──────────
+            // This is a separate second pass so all note-on / note-off events
+            // for this block have already been applied before the EG advances.
+            if (params.perNoteEg)
+            {
+                for (auto& n : scheduledNotes)
+                {
+                    if (!n.noteEgStarted || !n.noteOnFired || n.noteOffFired)
+                        continue;
+
+                    // ── Trigger EG release at the scheduled time ─────────────
+                    // This fires BEFORE offTimeMs so the release stage plays out
+                    // while the echo is still sounding; offTimeMs was extended
+                    // by noteOff() (or set tentatively at noteOn()) to match.
+                    if (!n.egNoteOffFired
+                        && n.egReleaseStartMs >= 0.0
+                        && n.egReleaseStartMs < blockEndMs)
+                    {
+                        n.noteEg.noteOff();
+                        n.egNoteOffFired = true;
+                    }
+
+                    double eg01 = 0.0;
+                    if (n.noteEg.processBlock (numSamples, eg01))
+                    {
+                        const auto ch = static_cast<std::size_t> (n.channel);
+                        if (ch >= 1 && ch <= 16)
+                        {
+                            perNoteEgOutput.maxEg01[ch] =
+                                juce::jmax (perNoteEgOutput.maxEg01[ch],
+                                            static_cast<float> (eg01));
+                            perNoteEgOutput.hasAnyValue = true;
+                        }
+                    }
                 }
             }
 
@@ -271,11 +403,35 @@ namespace modztakt::delay
                 scheduledNotes.end());
         }
 
+        // ── Per-note EG output (valid after each processBlock call) ───────────
+        const PerNoteEgOutput& getPerNoteEgOutput() const noexcept
+        {
+            return perNoteEgOutput;
+        }
+
+        // ── Query which MIDI channels have notes currently sounding ──────────
+        //
+        //    "Sounding" = note-on has been fired but note-off has not yet fired.
+        //    Used by PluginProcessor to determine which channels to send
+        //    EG-volume / EG-track-level CC to when delayEgShape is active.
+        //
+        //    out[1]..out[16] are set to true if that channel has at least one
+        //    echo currently sounding.  out[0] is always left false.
+        // ─────────────────────────────────────────────────────────────────────
+        void getActiveSoundingChannels (std::array<bool, 17>& out) const noexcept
+        {
+            out.fill (false);
+            for (const auto& n : scheduledNotes)
+                if (n.noteOnFired && !n.noteOffFired)
+                    out[static_cast<std::size_t> (n.channel)] = true;
+        }
+
         // ── Hard-clear all pending echoes (call from prepareToPlay) ──────────
         void reset()
         {
             scheduledNotes.clear();
             noteOnTimes.clear();
+            perNoteEgOutput = {};
         }
 
     private:
@@ -292,6 +448,13 @@ namespace modztakt::delay
             return juce::jlimit (0, juce::jmax (0, numSamples - 1), offset);
         }
 
+        // Compute the EG release duration in milliseconds from a Params struct.
+        // Mirrors EnvelopeEngine::releaseSliderToMs (seconds × 3 in long mode).
+        static double egReleaseMs (const modztakt::eg::Params& p) noexcept
+        {
+            return p.releaseSeconds * (p.releaseLongMode ? 3.0 : 1.0) * 1000.0;
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         Params params;
 
@@ -302,6 +465,9 @@ namespace modztakt::delay
         // Tracks note-start times so noteOff() can compute input note duration.
         // Key = MIDI note number (0–127), Value = blockStartMs at note-on.
         std::unordered_map<int, double> noteOnTimes;
+
+        // Per-note EG output — rebuilt each processBlock() when perNoteEg is active.
+        PerNoteEgOutput perNoteEgOutput;
 
         double sampleRate  = 48000.0;
         double msPerSample = 1000.0 / 48000.0;

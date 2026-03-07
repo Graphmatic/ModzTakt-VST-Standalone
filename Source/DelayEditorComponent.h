@@ -86,6 +86,68 @@ public:
                                                              feedbackSlider);
         setupFeedbackSlider();
 
+        // ── EG Shaping radio buttons ──────────────────────────────────────────
+        // Three mutually exclusive toggle buttons backed by a single APVTS
+        // AudioParameterChoice "delayEgShape":
+        //   0 = Off
+        //   1 = EG Volume     — global EG applied to "Amp: Volume" CC
+        //   2 = EG Track Level — global EG applied to "Track Level" CC
+        //   3 = Per Note EG   — each echo retriggers its own independent EG
+
+        egVolumeBtn   = std::make_unique<LedToggleButton> ("EG Volume",    SetupUI::LedColour::Blue);
+        egTrackLvlBtn = std::make_unique<LedToggleButton> ("EG Trk Level", SetupUI::LedColour::Blue);
+        egPerNoteBtn  = std::make_unique<LedToggleButton> ("Per Note EG",  SetupUI::LedColour::Green);
+
+        egVolumeBtn->setClickingTogglesState (true);
+        egTrackLvlBtn->setClickingTogglesState (true);
+        egPerNoteBtn->setClickingTogglesState (true);
+
+        addAndMakeVisible (*egVolumeBtn);
+        addAndMakeVisible (*egTrackLvlBtn);
+        addAndMakeVisible (*egPerNoteBtn);
+
+        // egVolumeBtn / egTrackLvlBtn: mutually exclusive radio pair.
+        // They share "delayEgShape" (0=Off, 1=EG Volume, 2=EG Track Level).
+        egVolumeBtn->onClick = [this]
+        {
+            if (egVolumeBtn->getToggleState())
+            {
+                egTrackLvlBtn->setToggleState (false, juce::dontSendNotification);
+                setDelayEgShapeParam (1);
+            }
+            else { setDelayEgShapeParam (0); }
+        };
+
+        egTrackLvlBtn->onClick = [this]
+        {
+            if (egTrackLvlBtn->getToggleState())
+            {
+                egVolumeBtn->setToggleState (false, juce::dontSendNotification);
+                setDelayEgShapeParam (2);
+            }
+            else { setDelayEgShapeParam (0); }
+        };
+
+        // egPerNoteBtn: fully independent toggle — does NOT affect delayEgShape.
+        // Backed directly by APVTS "delayEgPerNote" via ButtonAttachment.
+        egPerNoteAttach = std::make_unique<ButtonAttachment> (
+            apvts, "delayEgPerNote", *egPerNoteBtn);
+
+        egVolumeBtnLabel.setText ("EG Volume",    juce::dontSendNotification);
+        egVolumeBtnLabel.setJustificationType (juce::Justification::centredLeft);
+        egVolumeBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible (egVolumeBtnLabel);
+
+        egTrackLvlBtnLabel.setText ("EG Trk Level", juce::dontSendNotification);
+        egTrackLvlBtnLabel.setJustificationType (juce::Justification::centredLeft);
+        egTrackLvlBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible (egTrackLvlBtnLabel);
+
+        egPerNoteBtnLabel.setText ("Per Note EG", juce::dontSendNotification);
+        egPerNoteBtnLabel.setJustificationType (juce::Justification::centredLeft);
+        egPerNoteBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible (egPerNoteBtnLabel);
+
         // ── Output route channel boxes + transpose sliders ────────────────────
         for (int r = 0; r < maxRoutes; ++r)
         {
@@ -126,7 +188,7 @@ public:
         delaySyncAttach.reset();
         delayRateAttach.reset();
         feedbackAttach.reset();
-
+        egPerNoteAttach.reset();
         for (int r = 0; r < maxRoutes; ++r)
         {
             delayRouteChannelAttach[r].reset();
@@ -175,26 +237,64 @@ public:
             fb.performLayout (row);
         }
 
-        content.removeFromTop (20);
+        content.removeFromTop (12);
 
         // ── Note Source channel ───────────────────────────────────────────────
         placeRow (noteSourceDelayChannelLabel, noteSourceDelayChannelBox);
 
-        content.removeFromTop (10);
-
         // ── Sync division ─────────────────────────────────────────────────────
         placeRow (delaySyncLabel, delaySyncBox);
 
-        content.removeFromTop (18);
+        content.removeFromTop (10);
 
         // ── Sliders ───────────────────────────────────────────────────────────
         placeRow (delayRateLabel, delayRateSlider);
-
-        content.removeFromTop (18);
-
         placeRow (feedbackLabel,  feedbackSlider);
 
         content.removeFromTop (14);
+
+        // ── EG Shaping radio rows ─────────────────────────────────────────────
+        // Row A:  [●] EG Volume   [●] EG Trk Level
+        // Row B:  [●] Per Note EG
+        // Two rows keep each label readable without widening the panel.
+        {
+            constexpr float btnW  = 20.0f;
+            constexpr float lblW  = 76.0f;
+            constexpr float gap   = 8.0f;
+
+            auto rowA = content.removeFromTop (rowHeight);
+            {
+                juce::FlexBox fb;
+                fb.flexDirection  = juce::FlexBox::Direction::row;
+                fb.alignItems     = juce::FlexBox::AlignItems::center;
+                fb.justifyContent = juce::FlexBox::JustifyContent::center;
+
+                fb.items.add (juce::FlexItem (*egVolumeBtn)
+                                  .withWidth (btnW).withHeight ((float)(rowHeight - 4))
+                                  .withMargin ({ 0, 4, 0, 8 }));
+                fb.items.add (juce::FlexItem (egVolumeBtnLabel)
+                                  .withWidth (lblW).withHeight ((float) rowHeight)
+                                  .withMargin ({ 0, 2, 0, 0 }));
+                fb.items.add (juce::FlexItem (*egTrackLvlBtn)
+                                  .withWidth (btnW).withHeight ((float)(rowHeight - 4))
+                                  .withMargin ({ 0, gap, 0, 0 }));
+                fb.items.add (juce::FlexItem (egTrackLvlBtnLabel)
+                                  .withFlex (1.0f).withHeight ((float) rowHeight)
+                                  .withMargin ({ 0, 2, 0, 0 }));
+                fb.items.add (juce::FlexItem (*egPerNoteBtn)
+                                  .withWidth (btnW).withHeight ((float)(rowHeight - 4))
+                                  .withMargin ({ 0, 4, 0, 0 }));
+                fb.items.add (juce::FlexItem (egPerNoteBtnLabel)
+                                  .withFlex (1.0f).withHeight ((float) rowHeight)
+                                  .withMargin ({ 0, 2, 0, 0 }));
+                fb.performLayout (rowA.toFloat());
+            }
+
+            content.removeFromTop (4);
+
+        }
+
+        content.removeFromTop (10);
 
         // ── Output route rows ─────────────────────────────────────────────────
         // Each row: [Route N label | Channel combobox | Transpose slider]
@@ -230,7 +330,6 @@ public:
             layoutRouteRow (row, r);
             routesArea.removeFromTop (8);
         }
-
     }
 
 private:
@@ -240,7 +339,7 @@ private:
         updateDelayUiEnabledState();
     }
 
-    void updateDelayUiEnabledState()
+        void updateDelayUiEnabledState()
     {
         const bool enabled = apvts.getRawParameterValue ("delayEnabled")->load() > 0.5f;
 
@@ -273,6 +372,36 @@ private:
             delayRouteTransposeSlider[r].setEnabled (enabled);
         }
 
+        // EG shaping buttons: gated by delay enabled AND EG enabled.
+        // The APVTS "egEnabled" param is shared across modules so we can read it here.
+        const bool egEnabled = apvts.getRawParameterValue ("egEnabled")->load() > 0.5f;
+        const bool egShapeEditable = enabled && egEnabled;
+
+        if (egVolumeBtn)   egVolumeBtn->setEnabled (egShapeEditable);
+        if (egTrackLvlBtn) egTrackLvlBtn->setEnabled (egShapeEditable);
+        egVolumeBtnLabel.setEnabled (egShapeEditable);
+        egTrackLvlBtnLabel.setEnabled (egShapeEditable);
+
+        // Sync radio-pair toggle states from APVTS (handles automation / preset recall).
+        // "delayEgShape": 0=Off, 1=EG Volume, 2=EG Track Level.
+        // egPerNoteBtn is handled automatically by its ButtonAttachment.
+        const int egShape = static_cast<int> (apvts.getRawParameterValue ("delayEgShape")->load());
+        if (egVolumeBtn)   egVolumeBtn->setToggleState   (egShape == 1, juce::dontSendNotification);
+        if (egTrackLvlBtn) egTrackLvlBtn->setToggleState (egShape == 2, juce::dontSendNotification);
+
+        // "Per Note EG" is only meaningful when a destination is selected.
+        // Hide it entirely when delayEgShape == 0 so the option isn't
+        // confusingly available while no EG shaping destination is active.
+        // When hidden, the processor also skips the per-note EG path (see changes doc).
+        const bool perNoteVisible = egShapeEditable && (egShape > 0);
+        if (egPerNoteBtn)
+        {
+            egPerNoteBtn->setVisible (perNoteVisible);
+            egPerNoteBtn->setEnabled (perNoteVisible);
+        }
+        egPerNoteBtnLabel.setVisible (perNoteVisible);
+        egPerNoteBtnLabel.setEnabled (perNoteVisible);
+
         // Visual alpha fade.
         const float a      = enabled ? 1.0f : 0.45f;
         const float aRate  = rateEditable ? 1.0f : 0.40f;  // extra dim when overridden by sync
@@ -290,6 +419,13 @@ private:
             delayRouteLabel[r].setAlpha (enabled ? 1.0f : 0.60f);
             delayRouteTransposeSlider[r].setAlpha (a);
         }
+
+        // EG shaping buttons alpha (egPerNoteBtn uses visibility instead of alpha)
+        const float aEgShape = egShapeEditable ? 1.0f : 0.45f;
+        if (egVolumeBtn)   egVolumeBtn->setAlpha (aEgShape);
+        if (egTrackLvlBtn) egTrackLvlBtn->setAlpha (aEgShape);
+        egVolumeBtnLabel.setAlpha (aEgShape);
+        egTrackLvlBtnLabel.setAlpha (aEgShape);
     }
 
     // ── Slider setup helpers ──────────────────────────────────────────────────
@@ -368,6 +504,21 @@ private:
         s.updateText();
     }
 
+    // Write the delayEgShape choice index to APVTS.
+    // 0 = Off, 1 = EG Volume ("Amp: Volume"), 2 = EG Track Level ("Track Level").
+    // Note: "Per Note EG" behavior is governed by the separate "delayEgPerNote"
+    // AudioParameterBool and is independent of this choice.
+    void setDelayEgShapeParam (int choiceIndex)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                apvts.getParameter ("delayEgShape")))
+        {
+            p->beginChangeGesture();
+            *p = choiceIndex;
+            p->endChangeGesture();
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     APVTS& apvts;
 
@@ -402,6 +553,13 @@ private:
     // Per-route transpose sliders (-24 .. +24 semitones)
     std::array<juce::Slider,   maxRoutes> delayRouteTransposeSlider;
     std::array<std::unique_ptr<SliderAttachment>, maxRoutes> delayRouteTransposeAttach;
+
+    // EG shaping controls
+    // "delayEgShape" (0=Off / 1=EG Volume / 2=EG Track Level): mutually exclusive radio pair.
+    // "delayEgPerNote": independent bool toggle — can be ON simultaneously with either shape.
+    std::unique_ptr<LedToggleButton> egVolumeBtn, egTrackLvlBtn, egPerNoteBtn;
+    juce::Label egVolumeBtnLabel, egTrackLvlBtnLabel, egPerNoteBtnLabel;
+    std::unique_ptr<ButtonAttachment> egPerNoteAttach; // only egPerNoteBtn uses an attachment
 
     // Look & Feel instances (one per slider colour)
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };
