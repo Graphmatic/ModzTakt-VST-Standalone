@@ -540,6 +540,31 @@ private:
                         delayRouteChannelBox[r].setItemEnabled (ch + 1, true);
             }
 
+            // Sibling-route exclusion: grey any channel already selected by
+            // another delay route, regardless of EG shaping state.
+            // This is independent of the LFO/EG block above.
+            {
+                std::array<int, maxRoutes> routeCh {};
+                for (int r = 0; r < maxRoutes; ++r)
+                    routeCh[r] = (int) apvts.getRawParameterValue (
+                        "delayRoute" + juce::String (r) + "_channel")->load(); // 0=Disabled, 1..16
+
+                for (int r = 0; r < maxRoutes; ++r)
+                    for (int ch = 1; ch <= 16; ++ch)
+                    {
+                        // Check whether any sibling route holds this channel.
+                        bool takenBySibling = false;
+                        for (int s = 0; s < maxRoutes; ++s)
+                            if (s != r && routeCh[s] == ch)
+                                { takenBySibling = true; break; }
+
+                        if (takenBySibling)
+                            delayRouteChannelBox[r].setItemEnabled (ch + 1, false);
+                        // (enabling is already handled by the block above;
+                        //  we only ever add restrictions here, never lift them)
+                    }
+            }
+
             // Also enforce on every timer tick so routes set before egShape was
             // activated are cleaned up even without a button click.
             enforceDelayRouteConflicts();
@@ -782,13 +807,32 @@ private:
                 blocked[egCh] = true;
         }
 
-        // For each delay route, if its current channel is blocked, write Disabled (0).
+        // ── Snapshot current delay route channels ────────────────────────────
+        std::array<int, maxRoutes> routeCh {};
+
+        // ── Apply both rules; lowest-index route wins for duplicates ─────────
         for (int r = 0; r < maxRoutes; ++r)
         {
-            const int currentCh = (int) apvts.getRawParameterValue (
+            routeCh[r] = (int) apvts.getRawParameterValue (
                 "delayRoute" + juce::String (r) + "_channel")->load();
+        
+            const int ch = routeCh[r];
+            if (ch <= 0) continue;   // already Disabled
 
-            if (currentCh > 0 && blocked[currentCh])
+            bool mustDisable = false;
+
+            // Rule 1: cross-module block (only active when egShape > 0)
+            if (blocked[ch])
+                mustDisable = true;
+
+            // Rule 2: duplicate delay channel — a lower-index route already
+            // holds this channel; Syntakt tracks are monophonic so duplicates
+            // are always wrong regardless of EG shaping state.
+            if (!mustDisable)
+                for (int s = 0; s < r; ++s)
+                    if (routeCh[s] == ch) { mustDisable = true; break; }
+
+            if (mustDisable)
             {
                 if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
                         apvts.getParameter ("delayRoute" + juce::String (r) + "_channel")))
@@ -797,6 +841,7 @@ private:
                     *p = 0; // 0 = Disabled in the choice list
                     p->endChangeGesture();
                 }
+                routeCh[r] = 0; // update local snapshot so later routes see the cleared value
             }
         }
     }

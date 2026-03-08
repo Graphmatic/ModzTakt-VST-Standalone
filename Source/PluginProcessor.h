@@ -1175,7 +1175,7 @@ private:
     }
 
     // "Amp: Volume"  → CC 7 (or NRPN, depending on the table entry)
-    static inline const int delayEgVolumeParamIdx = findSyntaktParamIndexByName("Knob A");
+    static inline const int delayEgVolumeParamIdx = findSyntaktParamIndexByName("Amp: Volume");
 
     // "Track Level"  → CC 95 (or NRPN, depending on the table entry)
     static inline const int delayEgTrackLvlParamIdx = findSyntaktParamIndexByName ("Track Level");
