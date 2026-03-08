@@ -555,6 +555,7 @@ namespace modztakt::delay
         PerNoteEgOutput perNoteEgOutput;
 
         double sampleRate  = 48000.0;
+        // safe fallback
         double msPerSample = 1000.0 / 48000.0;
     };
 

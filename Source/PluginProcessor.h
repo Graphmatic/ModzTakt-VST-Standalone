@@ -53,7 +53,7 @@ public:
     inline void prepareToPlay (double sampleRate, int samplesPerBlock) override
     {
         cachedSampleRate = (sampleRate > 0.0 ? sampleRate : 48000.0);
-        cachedBlockSize  = samplesPerBlock;
+        cachedBlockSize  = samplesPerBlock; // keep: if audio added
 
         // EG
         egEngine.setSampleRate(cachedSampleRate);
@@ -159,8 +159,6 @@ public:
         const double blockStartMs = timeMs;
 
         const double blockDurationMs = 1000.0 * (double) audio.getNumSamples() / juce::jmax (1.0, getSampleRate());
-
-        currentBlockStartMs = blockStartMs;
 
         // timeMs is advanced at the end of the block so we can compute per-sample timestamps
         // for throttling / scheduling when needed.
@@ -1094,7 +1092,6 @@ private:
     int    cachedBlockSize  = 0;
 
     // Helpers for per-sample scheduling (updated each processBlock)
-    double currentBlockStartMs = 0.0;
     double timeMs = 0.0;
 
     static constexpr int maxRoutes = 3;
@@ -1202,12 +1199,6 @@ private:
         return filteredEgDest;
     }();
     
-    // lerp (math) = "Calculates a number between two numbers at a specific increment"
-    static inline double lerp(double a, double b, double t) noexcept
-    {
-        return a + (b - a) * t;
-    }
-
     //==============================================================================
 
     inline static APVTS::ParameterLayout createParameterLayout()
@@ -1398,7 +1389,6 @@ private:
         {
             juce::StringArray s;
             s.add("Disabled");
-            // s.add("LFO");
             for (int ch = 1; ch <= 16; ++ch)
                 s.add("Ch " + juce::String(ch));
             return s;
@@ -1417,7 +1407,6 @@ private:
             ));
 
             // Destination choice is Ch_x: uses SyntaktParameterEG (EG destinations )
-            //ModzTaktAudioProcessor::findFirstEgDestination()
             p.push_back (std::make_unique<juce::AudioParameterChoice>(
                 "egRoute" + rs + "_dest",
                 "EG Route " + rs + " Destination",
@@ -1663,17 +1652,6 @@ private:
                 uiRequestSetLfoActiveOn.store(true, std::memory_order_release);
             }
         }
-    }
-
-    // Helper to find first valid destination
-    static int findFirstEgDestination()
-    {
-        for (int i = 0; i < juce::numElementsInArray(syntaktParameters); ++i)
-        {
-            if (syntaktParameters[i].egDestination)
-                return i;
-        }
-        return 0;
     }
 
     inline int mapEgToMidi (double egVal, int paramId) const

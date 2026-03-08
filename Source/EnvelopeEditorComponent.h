@@ -719,20 +719,18 @@ private:
         
         releaseSlider.repaint();
     }
-
     
-    // MODIFIED: New enum for channel type
+    // New enum for channel type
     enum class ChannelType {
             Disabled,  // ID 1
             MIDI       // ID 2..17
     };
 
-    // MODIFIED: Determine channel type from selected ID
+    // Determine channel type from selected ID
     ChannelType getChannelType(int routeIndex) const
     {
         const int id = egRouteChannelBox[routeIndex].getSelectedId();
         if (id == 1) return ChannelType::Disabled;
-        // if (id == 2) return ChannelType::LFO;
         return ChannelType::MIDI;
     }
 
@@ -918,7 +916,6 @@ private:
     {
         const int id = egRouteChannelBox[r].getSelectedId();
         if (id <= 1) return 0;         // Disabled
-        // if (id == 2) return -1;        // LFO (special marker)
         return id - 1;                 // Ch 1..16 (IDs 2..17 → 1..16)
     }
 
