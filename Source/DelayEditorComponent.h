@@ -95,8 +95,8 @@ public:
         //   3 = Per Note EG   — each echo retriggers its own independent EG
 
         egVolumeBtn   = std::make_unique<LedToggleButton> ("EG Volume",    SetupUI::LedColour::Blue);
-        egTrackLvlBtn = std::make_unique<LedToggleButton> ("EG Trk Level", SetupUI::LedColour::Blue);
-        egPerNoteBtn  = std::make_unique<LedToggleButton> ("Per Note EG",  SetupUI::LedColour::Blue);
+        egTrackLvlBtn = std::make_unique<LedToggleButton> ("EG Track Level", SetupUI::LedColour::Blue);
+        egPerNoteBtn  = std::make_unique<LedToggleButton> ("Per Note EG",  SetupUI::LedColour::Green);
 
         egVolumeBtn->setClickingTogglesState (true);
         egTrackLvlBtn->setClickingTogglesState (true);
@@ -142,7 +142,7 @@ public:
         egVolumeBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible (egVolumeBtnLabel);
 
-        egTrackLvlBtnLabel.setText ("EG Trk Level", juce::dontSendNotification);
+        egTrackLvlBtnLabel.setText ("EG Track Level", juce::dontSendNotification);
         egTrackLvlBtnLabel.setJustificationType (juce::Justification::centredLeft);
         egTrackLvlBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible (egTrackLvlBtnLabel);
@@ -258,7 +258,7 @@ public:
         content.removeFromTop (14);
 
         // ── EG Shaping radio rows ─────────────────────────────────────────────
-        // Row A:  [●] EG Volume   [●] EG Trk Level
+        // Row A:  [●] EG Volume   [●] EG Track Level
         // Row B:  [●] Per Note EG
         // Two rows keep each label readable without widening the panel.
         {
