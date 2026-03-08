@@ -748,7 +748,7 @@ public:
         lfoAreaContent.removeFromTop(10);
         startButton.setBounds(lfoAreaContent.removeFromTop(40));
 
-        lfoAreaContent.removeFromTop(10);
+        lfoAreaContent.removeFromTop(16);
 
         auto placeRowToggle = [&](juce::Button& button,
                                   juce::Label& label,

@@ -45,6 +45,7 @@ public:
 
         // ---- MIDI note source channel
         noteSourceEgChannelLabel.setText("Note Source", juce::dontSendNotification);
+        noteSourceEgChannelLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible(noteSourceEgChannelLabel);
         addAndMakeVisible(noteSourceEgChannelBox);
         for (int ch = 1; ch <= 16; ++ch)
@@ -58,6 +59,7 @@ public:
             const auto rs = juce::String(r);
 
             egRouteChannelLabel[r].setText("Route " + juce::String(r+1), juce::dontSendNotification);
+            egRouteChannelLabel[r].setColour (juce::Label::textColourId, SetupUI::labelsColor);
             addAndMakeVisible(egRouteChannelLabel[r]);
 
             addAndMakeVisible(egRouteChannelBox[r]);
@@ -71,6 +73,7 @@ public:
             );
 
             egRouteDestLabel[r].setText("Dest. CC", juce::dontSendNotification);
+            egRouteDestLabel[r].setColour (juce::Label::textColourId, SetupUI::labelsColor);
             addAndMakeVisible(egRouteDestLabel[r]);
 
             addAndMakeVisible(egRouteDestBox[r]);
@@ -1014,6 +1017,7 @@ private:
         addAndMakeVisible(attackSlider);
         addAndMakeVisible(attackLabel);
         attackLabel.setText("Attack", juce::dontSendNotification);
+        attackLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
 
         attackSlider.setSliderStyle(juce::Slider::LinearHorizontal);
         attackSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
@@ -1043,6 +1047,7 @@ private:
         addAndMakeVisible(holdSlider);
         addAndMakeVisible(holdLabel);
         holdLabel.setText("Hold", juce::dontSendNotification);
+        holdLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
 
         holdSlider.setSliderStyle(juce::Slider::LinearHorizontal);
         holdSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
@@ -1064,6 +1069,7 @@ private:
         addAndMakeVisible(decaySlider);
         addAndMakeVisible(decayLabel);
         decayLabel.setText("Decay", juce::dontSendNotification);
+        decayLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
 
         decaySlider.setSliderStyle(juce::Slider::LinearHorizontal);
         decaySlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
@@ -1084,6 +1090,7 @@ private:
         addAndMakeVisible(sustainSlider);
         addAndMakeVisible(sustainLabel);
         sustainLabel.setText("Sustain", juce::dontSendNotification);
+        sustainLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
 
         sustainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
         sustainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
@@ -1103,6 +1110,7 @@ private:
         addAndMakeVisible(releaseSlider);
         addAndMakeVisible(releaseLabel);
         releaseLabel.setText("Release", juce::dontSendNotification);
+        releaseLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
 
         releaseSlider.setSliderStyle(juce::Slider::LinearHorizontal);
         releaseSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
@@ -1127,6 +1135,7 @@ private:
         addAndMakeVisible(velocityAmountSlider);
         addAndMakeVisible(velocityAmountLabel);
         velocityAmountLabel.setText("Vel. Amount", juce::dontSendNotification);
+        velocityAmountLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
 
         velocityAmountSlider.setSliderStyle(juce::Slider::LinearHorizontal);
         velocityAmountSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
