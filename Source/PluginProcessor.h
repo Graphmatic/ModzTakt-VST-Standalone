@@ -902,24 +902,32 @@ public:
         }
 
         //======================================================================
+        // DELAY MIDI OUTPUT
+        // Must run every block (engine advances its internal clock even when idle)
+        //======================================================================
+
+        delayEngine.processBlock (audio.getNumSamples(), blockStartMs, midi);
+
+        //======================================================================
         // PER-NOTE EG OUTPUT
         //
         // When "delayEgPerNote" is true AND a destination is selected, each echo
         // has its own EG retriggered at its note-on.  We mirror the UI rule:
         // egPerNoteBtn is only visible when delayEgShape > 0, so the processor
         // matches by also requiring delayEgShapeChoice > 0 here.
+        //
+        // NOTE: delayEgShapeChoice and delayEgPerNote are already declared above
+        // in the "EG → DELAY ECHO SHAPING" block (section 6) — do not re-declare.
         //======================================================================
-
         if (delayEgPerNote && delayEgShapeChoice > 0 && delayParams.enabled)
         {
             const auto& pnEgOut = delayEngine.getPerNoteEgOutput();
 
             if (pnEgOut.hasAnyValue)
             {
-                const int paramIdx = (delayEgShapeChoice == 1)
-                                 ? delayEgVolumeParamIdx    // "Amp: Volume"
-                                 : delayEgTrackLvlParamIdx; // "Track Level"
-
+                const int  paramIdx = (delayEgShapeChoice == 1)
+                                      ? delayEgVolumeParamIdx
+                                      : delayEgTrackLvlParamIdx;
                 const auto& param   = syntaktParameters[paramIdx];
 
                 for (int ch = 1; ch <= 16; ++ch)
@@ -941,13 +949,6 @@ public:
                 }
             }
         }
-
-        //======================================================================
-        // DELAY MIDI OUTPUT
-        // Must run every block (engine advances its internal clock even when idle)
-        //======================================================================
-
-        delayEngine.processBlock (audio.getNumSamples(), blockStartMs, midi);
 
         // Advance global time after processing the block
         timeMs = blockStartMs + blockDurationMs;
@@ -1170,13 +1171,10 @@ private:
     }
 
     // "Amp: Volume"  → CC 7 (or NRPN, depending on the table entry)
-    static inline const int delayEgVolumeParamIdx =
-        findSyntaktParamIndexByName ("Knob A"); //("Amp: Volume");
+    static inline const int delayEgVolumeParamIdx = findSyntaktParamIndexByName("Amp: Volume");
 
     // "Track Level"  → CC 95 (or NRPN, depending on the table entry)
-    static inline const int delayEgTrackLvlParamIdx =
-        findSyntaktParamIndexByName ("Track Level");
-
+    static inline const int delayEgTrackLvlParamIdx = findSyntaktParamIndexByName ("Track Level");
 
     // Throttle state for outgoing MIDI
     std::unordered_map<int, int>    lastSentValuePerParam;

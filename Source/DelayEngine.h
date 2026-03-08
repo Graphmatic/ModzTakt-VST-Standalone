@@ -89,6 +89,23 @@ namespace modztakt::delay
     };
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Pre-note CC primer — returned by collectNoteOnPrefires() which the
+    // processor must call BEFORE processBlock().
+    //
+    // For each echo note-on due this block the processor injects a CC at
+    // sampleOffset carrying the initial EG value (0.0 = silence).  Because
+    // JUCE MidiBuffer preserves insertion order for equal timestamps, the CC
+    // lands before the note-on that processBlock() writes at the same offset,
+    // so the synth's volume is already set before the note event arrives.
+    // ─────────────────────────────────────────────────────────────────────────
+    struct NoteOnPrefire
+    {
+        int   channel;       // MIDI channel 1–16
+        int   sampleOffset;  // position within the current block
+        float initialEg01;   // always 0.0f (attack always starts from silence)
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Internal scheduled event: one note-on + matching note-off on one channel.
     // ─────────────────────────────────────────────────────────────────────────
     struct ScheduledNote
@@ -283,12 +300,49 @@ namespace modztakt::delay
             }
         }
 
+        // ── Call this BEFORE processBlock when perNoteEg is active. ──────────
+        //
+        //    Scans scheduled notes and returns one NoteOnPrefire entry for every
+        //    echo whose note-on will fire during [blockStartMs, blockEndMs).
+        //    The processor uses these to inject an initial CC into the MIDI buffer
+        //    BEFORE calling processBlock so the CC timestamp precedes the note-on.
+        //
+        //    out is appended to (not cleared) so the caller can accumulate across
+        //    multiple calls if desired.
+        // ─────────────────────────────────────────────────────────────────────
+        void collectNoteOnPrefires (double                      blockStartMs,
+                                    int                         numSamples,
+                                    std::vector<NoteOnPrefire>& out) const
+        {
+            if (!params.perNoteEg)
+                return;
+
+            const double blockEndMs = blockStartMs
+                                    + static_cast<double> (numSamples) * msPerSample;
+
+            for (const auto& n : scheduledNotes)
+            {
+                if (n.noteOnFired || n.onTimeMs >= blockEndMs)
+                    continue;
+
+                out.push_back ({
+                    n.channel,
+                    msToSampleOffset (n.onTimeMs, blockStartMs, msPerSample, numSamples),
+                    0.0f   // EG always starts from silence (reset() before noteOn())
+                });
+            }
+        }
+
         // ── Called every processBlock to flush due events into the output buffer.
         //    Pass the same `midi` buffer that LFO / EG already write into.
         //
         //    When Params::perNoteEg is true, each echo retriggers its own embedded
         //    EG.  After this call, read getPerNoteEgOutput() to obtain the max EG
         //    value per MIDI channel (use it to send a volume CC from the processor).
+        //
+        //    IMPORTANT: when perNoteEg is true, call collectNoteOnPrefires() and
+        //    inject the returned CCs into the same midi buffer BEFORE this call so
+        //    the synth receives volume=0 before the incoming note event.
         // ─────────────────────────────────────────────────────────────────────
         void processBlock (int               numSamples,
                            double            blockStartMs,

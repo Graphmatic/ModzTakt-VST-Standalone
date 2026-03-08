@@ -96,7 +96,7 @@ public:
 
         egVolumeBtn   = std::make_unique<LedToggleButton> ("EG Volume",    SetupUI::LedColour::Blue);
         egTrackLvlBtn = std::make_unique<LedToggleButton> ("EG Trk Level", SetupUI::LedColour::Blue);
-        egPerNoteBtn  = std::make_unique<LedToggleButton> ("Per Note EG",  SetupUI::LedColour::Green);
+        egPerNoteBtn  = std::make_unique<LedToggleButton> ("Per Note EG",  SetupUI::LedColour::Blue);
 
         egVolumeBtn->setClickingTogglesState (true);
         egTrackLvlBtn->setClickingTogglesState (true);
@@ -116,6 +116,8 @@ public:
                 setDelayEgShapeParam (1);
             }
             else { setDelayEgShapeParam (0); }
+            // Immediately purge any delay routes that now conflict.
+            enforceDelayRouteConflicts();
         };
 
         egTrackLvlBtn->onClick = [this]
@@ -126,6 +128,8 @@ public:
                 setDelayEgShapeParam (2);
             }
             else { setDelayEgShapeParam (0); }
+            // Immediately purge any delay routes that now conflict.
+            enforceDelayRouteConflicts();
         };
 
         // egPerNoteBtn: fully independent toggle — does NOT affect delayEgShape.
@@ -339,7 +343,7 @@ private:
         updateDelayUiEnabledState();
     }
 
-        void updateDelayUiEnabledState()
+    void updateDelayUiEnabledState()
     {
         const bool enabled = apvts.getRawParameterValue ("delayEnabled")->load() > 0.5f;
 
@@ -370,6 +374,57 @@ private:
             delayRouteChannelBox[r].setEnabled (enabled);
             delayRouteLabel[r].setEnabled (enabled);
             delayRouteTransposeSlider[r].setEnabled (enabled);
+        }
+
+        // Cross-module conflict: when EG shaping is active, grey channels in
+        // delayRouteChannelBox that are already claimed by LFO or EG routes for the
+        // same destination parameter (Amp: Volume or Track Level).
+        // enforceDelayRouteConflicts() has already cleared any conflicting routes
+        // by this point (called from onClick and from this function below), so
+        // the currently-selected channel for each route is guaranteed to be clean.
+        {
+            const int egShape = static_cast<int> (apvts.getRawParameterValue ("delayEgShape")->load());
+
+            if (egShape > 0)
+            {
+                const int targetGlobalIdx = findGlobalParamByName (
+                    egShape == 1 ? "Amp: Volume" : "Track Level");
+
+                std::array<bool, 17> blocked {};
+
+                for (int r = 0; r < maxRoutes; ++r)
+                {
+                    const auto rs   = juce::String (r);
+                    const int lfoCh = (int) apvts.getRawParameterValue ("route"    + rs + "_channel")->load();
+                    const int lfoP  = (int) apvts.getRawParameterValue ("route"    + rs + "_param"  )->load();
+                    if (lfoCh > 0 && lfoP == targetGlobalIdx)
+                        blocked[lfoCh] = true;
+                }
+
+                for (int r = 0; r < maxRoutes; ++r)
+                {
+                    const auto rs  = juce::String (r);
+                    const int egCh   = (int) apvts.getRawParameterValue ("egRoute" + rs + "_channel")->load();
+                    if (egCh <= 0) continue;
+                    const int egDest = (int) apvts.getRawParameterValue ("egRoute" + rs + "_dest"   )->load();
+                    if (mapEgChoiceToGlobal (egDest) == targetGlobalIdx)
+                        blocked[egCh] = true;
+                }
+
+                for (int r = 0; r < maxRoutes; ++r)
+                    for (int ch = 1; ch <= 16; ++ch)
+                        delayRouteChannelBox[r].setItemEnabled (ch + 1, !blocked[ch]);
+            }
+            else
+            {
+                for (int r = 0; r < maxRoutes; ++r)
+                    for (int ch = 1; ch <= 16; ++ch)
+                        delayRouteChannelBox[r].setItemEnabled (ch + 1, true);
+            }
+
+            // Also enforce on every timer tick so routes set before egShape was
+            // activated are cleaned up even without a button click.
+            enforceDelayRouteConflicts();
         }
 
         // EG shaping buttons: gated by delay enabled AND EG enabled.
@@ -517,6 +572,93 @@ private:
             *p = choiceIndex;
             p->endChangeGesture();
         }
+    }
+
+    // ── Cross-module conflict enforcement ─────────────────────────────────────
+    //
+    // Called from onClick (immediate) and from updateDelayUiEnabledState (20 Hz).
+    // When egShape > 0, any delay route whose channel is already owned by an LFO
+    // or EG route for the same target parameter is forced to Disabled.
+    // This is the only place that writes to delayRoute{r}_channel.
+    void enforceDelayRouteConflicts()
+    {
+        const int egShape = static_cast<int> (
+            apvts.getRawParameterValue ("delayEgShape")->load());
+
+        if (egShape == 0)
+            return; // nothing to enforce when shaping is off
+
+        const int targetGlobalIdx = findGlobalParamByName (
+            egShape == 1 ? "Amp: Volume" : "Track Level");
+
+        // Build the blocked channel set (same logic as the greying block).
+        std::array<bool, 17> blocked {};
+
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs   = juce::String (r);
+            const int lfoCh = (int) apvts.getRawParameterValue ("route"    + rs + "_channel")->load();
+            const int lfoP  = (int) apvts.getRawParameterValue ("route"    + rs + "_param"  )->load();
+            if (lfoCh > 0 && lfoP == targetGlobalIdx)
+                blocked[lfoCh] = true;
+        }
+
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const auto rs  = juce::String (r);
+            const int egCh   = (int) apvts.getRawParameterValue ("egRoute" + rs + "_channel")->load();
+            if (egCh <= 0) continue;
+            const int egDest = (int) apvts.getRawParameterValue ("egRoute" + rs + "_dest"   )->load();
+            if (mapEgChoiceToGlobal (egDest) == targetGlobalIdx)
+                blocked[egCh] = true;
+        }
+
+        // For each delay route, if its current channel is blocked, write Disabled (0).
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const int currentCh = (int) apvts.getRawParameterValue (
+                "delayRoute" + juce::String (r) + "_channel")->load();
+
+            if (currentCh > 0 && blocked[currentCh])
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        apvts.getParameter ("delayRoute" + juce::String (r) + "_channel")))
+                {
+                    p->beginChangeGesture();
+                    *p = 0; // 0 = Disabled in the choice list
+                    p->endChangeGesture();
+                }
+            }
+        }
+    }
+
+    // ── Cross-module conflict helpers ─────────────────────────────────────────
+    //
+    // Both are static so they can be called without a component instance and
+    // reused in LFO / EG editors (same SyntaktParameterTable.h is included there).
+
+    // Find global syntaktParameters[] index by exact name. Returns -1 if not found.
+    static int findGlobalParamByName (const char* name) noexcept
+    {
+        for (int i = 0; i < juce::numElementsInArray (syntaktParameters); ++i)
+            if (juce::String (syntaktParameters[i].name) == name)
+                return i;
+        return -1;
+    }
+
+    // Map an EG destination choice index (0-based position in the egDestination=true
+    // filtered list) to the global syntaktParameters[] index.
+    // Mirrors EnvelopeEditorComponent::mapEgChoiceToGlobalParamIndex().
+    static int mapEgChoiceToGlobal (int egChoice) noexcept
+    {
+        int k = 0;
+        for (int i = 0; i < juce::numElementsInArray (syntaktParameters); ++i)
+        {
+            if (!syntaktParameters[i].egDestination) continue;
+            if (k == egChoice) return i;
+            ++k;
+        }
+        return -1;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

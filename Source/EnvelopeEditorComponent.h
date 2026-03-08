@@ -589,6 +589,10 @@ private:
 
         // Update release slider outline based on releaseLong parameter
         updateReleaseSliderOutline();
+
+        // Refresh dest box filtering every tick so changes made in LFO or Delay
+        // routes are reflected immediately without requiring a channel re-select.
+        refreshEgRouteAvailability();
     }
 
     void setChoiceParam(const char* paramID, int choiceIndex)
@@ -845,6 +849,32 @@ private:
                 return false;
         }
 
+        // conflict with Delay EG shaping:
+        // when delayEgShape > 0 the delay engine owns (delayRouteCh, targetParam).
+        {
+            const int delayEgShape =
+                (int) apvts.getRawParameterValue ("delayEgShape")->load();
+
+            if (delayEgShape > 0)
+            {
+                const int delayTargetParam =
+                    (delayEgShape == 1)
+                        ? findGlobalParamByName ("Amp: Volume")
+                        : findGlobalParamByName ("Track Level");
+
+                if (globalParamIdx == delayTargetParam)
+                {
+                    for (int dr = 0; dr < maxRoutes; ++dr)
+                    {
+                        const int dCh = (int) apvts.getRawParameterValue (
+                            "delayRoute" + juce::String (dr) + "_channel")->load();
+                        if (dCh == ch)
+                            return false;
+                    }
+                }
+            }
+        }
+
         return true;
     }
 
@@ -862,6 +892,16 @@ private:
     }
 
     // helpers used to prevent conflicts between LFO and EG dest. param
+
+    // Find global syntaktParameters[] index by exact name. Returns -1 if not found.
+    static int findGlobalParamByName (const char* name) noexcept
+    {
+        for (int i = 0; i < juce::numElementsInArray (syntaktParameters); ++i)
+            if (juce::String (syntaktParameters[i].name) == name)
+                return i;
+        return -1;
+    }
+
     int getEgMidiDestCount() const
     {
         int count = 0;

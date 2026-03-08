@@ -1144,6 +1144,9 @@ private:
         {
             bpmLabel.setText("--", juce::dontSendNotification);
         }
+
+        // Keep LFO param boxes consistent with changes made in EG or Delay routes.
+        refreshRouteParamAvailability();
     }
 
     // --- Route exclusivity UI (channel + parameter must be unique per channel) ---
@@ -1170,11 +1173,70 @@ private:
     {
         if (channel <= 0 || paramIdx < 0) return false;
 
+        // Check other LFO routes (existing logic).
         for (int r = 0; r < maxRoutes; ++r)
         {
             if (r == exceptRoute) continue;
 
             if (getRouteChannelNumber(r) == channel && getRouteParamIndex(r) == paramIdx)
+                return true;
+        }
+
+        // Check EG routes: "egRoute{r}_channel" = 0..16,
+        // "egRoute{r}_dest" = 0-based index into the egDestination=true filtered list.
+        // processor.SyntaktParameterEgIndex maps that to the global syntaktParameters[] index.
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const int egCh = (int) apvts.getRawParameterValue (
+                "egRoute" + juce::String (r) + "_channel")->load();
+            if (egCh != channel) continue;
+
+            const int egDest = (int) apvts.getRawParameterValue (
+                "egRoute" + juce::String (r) + "_dest")->load();
+
+            const auto& egIdx = processor.SyntaktParameterEgIndex;
+            if (egDest >= 0 && egDest < egIdx.size() && egIdx[egDest] == paramIdx)
+                return true;
+        }
+
+        return false;
+    }
+
+    // Returns the global syntaktParameters[] index for a parameter by name.
+    static int findGlobalParamByName (const char* name) noexcept
+    {
+        for (int i = 0; i < juce::numElementsInArray (syntaktParameters); ++i)
+            if (juce::String (syntaktParameters[i].name) == name)
+                return i;
+        return -1;
+    }
+
+    // Returns true when the Delay EG shaping feature has claimed (channel, globalParamIdx) —
+    // i.e. the delay engine is sending Amp:Volume or Track Level on that channel.
+    bool isParamClaimedByDelayEg (int channel, int globalParamIdx) const
+    {
+        if (channel <= 0 || globalParamIdx < 0)
+            return false;
+
+        const int delayEgShape =
+            (int) apvts.getRawParameterValue ("delayEgShape")->load();
+
+        if (delayEgShape == 0)
+            return false;
+
+        const int delayTargetParam =
+            (delayEgShape == 1)
+                ? findGlobalParamByName ("Amp: Volume")
+                : findGlobalParamByName ("Track Level");
+
+        if (globalParamIdx != delayTargetParam)
+            return false;
+
+        for (int dr = 0; dr < maxRoutes; ++dr)
+        {
+            const int dCh = (int) apvts.getRawParameterValue (
+                "delayRoute" + juce::String (dr) + "_channel")->load();
+            if (dCh == channel)
                 return true;
         }
         return false;
@@ -1208,7 +1270,11 @@ private:
             {
                 const bool taken = isParamTakenOnChannel(ch, p, i);
                 const bool isCurrent = (p == currentParamIdx);
-                routeParameterBoxes[i].setItemEnabled(p + 1, !taken || isCurrent);
+
+                // Also block params claimed by Delay EG shaping on this channel.
+                const bool claimedByDelay = isParamClaimedByDelayEg (ch, p);
+
+                routeParameterBoxes[i].setItemEnabled (p + 1, (!taken && !claimedByDelay) || isCurrent);
             }
         }
 
