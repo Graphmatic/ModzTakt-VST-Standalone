@@ -422,6 +422,31 @@ private:
                         delayRouteChannelBox[r].setItemEnabled (ch + 1, true);
             }
 
+            // Sibling-route exclusion: grey any channel already selected by
+            // another delay route, regardless of EG shaping state.
+            // This is independent of the LFO/EG block above.
+            {
+                std::array<int, maxRoutes> routeCh {};
+                for (int r = 0; r < maxRoutes; ++r)
+                    routeCh[r] = (int) apvts.getRawParameterValue (
+                        "delayRoute" + juce::String (r) + "_channel")->load(); // 0=Disabled, 1..16
+
+                for (int r = 0; r < maxRoutes; ++r)
+                    for (int ch = 1; ch <= 16; ++ch)
+                    {
+                        // Check whether any sibling route holds this channel.
+                        bool takenBySibling = false;
+                        for (int s = 0; s < maxRoutes; ++s)
+                            if (s != r && routeCh[s] == ch)
+                                { takenBySibling = true; break; }
+
+                        if (takenBySibling)
+                            delayRouteChannelBox[r].setItemEnabled (ch + 1, false);
+                        // (enabling is already handled by the block above;
+                        //  we only ever add restrictions here, never lift them)
+                    }
+            }
+
             // Also enforce on every timer tick so routes set before egShape was
             // activated are cleaned up even without a button click.
             enforceDelayRouteConflicts();
@@ -582,44 +607,63 @@ private:
     // This is the only place that writes to delayRoute{r}_channel.
     void enforceDelayRouteConflicts()
     {
+        // ── Rule 1: cross-module (LFO / EG) — only relevant when EG shaping active ──
         const int egShape = static_cast<int> (
             apvts.getRawParameterValue ("delayEgShape")->load());
 
-        if (egShape == 0)
-            return; // nothing to enforce when shaping is off
+        std::array<bool, 17> blockedByModule {};
 
-        const int targetGlobalIdx = findGlobalParamByName (
-            egShape == 1 ? "Amp: Volume" : "Track Level");
-
-        // Build the blocked channel set (same logic as the greying block).
-        std::array<bool, 17> blocked {};
-
-        for (int r = 0; r < maxRoutes; ++r)
+        if (egShape > 0)
         {
-            const auto rs   = juce::String (r);
-            const int lfoCh = (int) apvts.getRawParameterValue ("route"    + rs + "_channel")->load();
-            const int lfoP  = (int) apvts.getRawParameterValue ("route"    + rs + "_param"  )->load();
-            if (lfoCh > 0 && lfoP == targetGlobalIdx)
-                blocked[lfoCh] = true;
+            const int targetGlobalIdx = findGlobalParamByName (
+                egShape == 1 ? "Amp: Volume" : "Track Level");
+
+            for (int r = 0; r < maxRoutes; ++r)
+            {
+                const auto rs   = juce::String (r);
+                const int lfoCh = (int) apvts.getRawParameterValue ("route"    + rs + "_channel")->load();
+                const int lfoP  = (int) apvts.getRawParameterValue ("route"    + rs + "_param"  )->load();
+                if (lfoCh > 0 && lfoP == targetGlobalIdx)
+                    blockedByModule[lfoCh] = true;
+            }
+
+            for (int r = 0; r < maxRoutes; ++r)
+            {
+                const auto rs  = juce::String (r);
+                const int egCh   = (int) apvts.getRawParameterValue ("egRoute" + rs + "_channel")->load();
+                if (egCh <= 0) continue;
+                const int egDest = (int) apvts.getRawParameterValue ("egRoute" + rs + "_dest"   )->load();
+                if (mapEgChoiceToGlobal (egDest) == targetGlobalIdx)
+                    blockedByModule[egCh] = true;
+            }
         }
 
+        // ── Snapshot current delay route channels ────────────────────────────
+        std::array<int, maxRoutes> routeCh {};
         for (int r = 0; r < maxRoutes; ++r)
-        {
-            const auto rs  = juce::String (r);
-            const int egCh   = (int) apvts.getRawParameterValue ("egRoute" + rs + "_channel")->load();
-            if (egCh <= 0) continue;
-            const int egDest = (int) apvts.getRawParameterValue ("egRoute" + rs + "_dest"   )->load();
-            if (mapEgChoiceToGlobal (egDest) == targetGlobalIdx)
-                blocked[egCh] = true;
-        }
-
-        // For each delay route, if its current channel is blocked, write Disabled (0).
-        for (int r = 0; r < maxRoutes; ++r)
-        {
-            const int currentCh = (int) apvts.getRawParameterValue (
+            routeCh[r] = (int) apvts.getRawParameterValue (
                 "delayRoute" + juce::String (r) + "_channel")->load();
 
-            if (currentCh > 0 && blocked[currentCh])
+        // ── Apply both rules; lowest-index route wins for duplicates ─────────
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const int ch = routeCh[r];
+            if (ch <= 0) continue;   // already Disabled
+
+            bool mustDisable = false;
+
+            // Rule 1: cross-module block (only active when egShape > 0)
+            if (blockedByModule[ch])
+                mustDisable = true;
+
+            // Rule 2: duplicate delay channel — a lower-index route already
+            // holds this channel; Syntakt tracks are monophonic so duplicates
+            // are always wrong regardless of EG shaping state.
+            if (!mustDisable)
+                for (int s = 0; s < r; ++s)
+                    if (routeCh[s] == ch) { mustDisable = true; break; }
+
+            if (mustDisable)
             {
                 if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
                         apvts.getParameter ("delayRoute" + juce::String (r) + "_channel")))
@@ -628,6 +672,7 @@ private:
                     *p = 0; // 0 = Disabled in the choice list
                     p->endChangeGesture();
                 }
+                routeCh[r] = 0; // update local snapshot so later routes see the cleared value
             }
         }
     }
