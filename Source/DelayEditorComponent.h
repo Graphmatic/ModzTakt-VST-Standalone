@@ -21,7 +21,7 @@ public:
 
         // ── Group frame ───────────────────────────────────────────────────────
         addAndMakeVisible (delayGroup);
-        delayGroup.setText ("Note Delay");
+        delayGroup.setText ("DELAY");
         delayGroup.setColour (juce::GroupComponent::outlineColourId, juce::Colours::white);
         delayGroup.setColour (juce::GroupComponent::textColourId,    juce::Colours::white);
 
@@ -142,7 +142,7 @@ public:
         egVolumeBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible (egVolumeBtnLabel);
 
-        egTrackLvlBtnLabel.setText ("EG Track Level", juce::dontSendNotification);
+        egTrackLvlBtnLabel.setText ("EG Trk Level", juce::dontSendNotification);
         egTrackLvlBtnLabel.setJustificationType (juce::Justification::centredLeft);
         egTrackLvlBtnLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible (egTrackLvlBtnLabel);
@@ -178,6 +178,56 @@ public:
             setupTransposeSlider (delayRouteTransposeSlider[r]);
         }
 
+        // ── Step sequencer ────────────────────────────────────────────────────
+        // Sub-frame
+        addAndMakeVisible (seqGroup);
+        seqGroup.setText ("Echo Seq");
+        seqGroup.setColour (juce::GroupComponent::outlineColourId, SetupUI::labelsColor);
+        seqGroup.setColour (juce::GroupComponent::textColourId,    SetupUI::labelsColor);
+
+        // Binary / Ternary radio pair — always both visible, one always active.
+        // No ButtonAttachment: state is written to "delaySeqTernary" manually,
+        // mirroring the pattern used by egVolumeBtn / egTrackLvlBtn.
+        seqBinaryBtn  = std::make_unique<LedToggleButton> ("Binary",  SetupUI::LedColour::Red);
+        seqTernaryBtn = std::make_unique<LedToggleButton> ("Ternary", SetupUI::LedColour::Red);
+        seqBinaryBtn ->setClickingTogglesState (true);
+        seqTernaryBtn->setClickingTogglesState (true);
+        addAndMakeVisible (*seqBinaryBtn);
+        addAndMakeVisible (*seqTernaryBtn);
+
+        seqBinaryBtn->onClick = [this]
+        {
+            seqTernaryBtn->setToggleState (false, juce::dontSendNotification);
+            seqBinaryBtn ->setToggleState (true,  juce::dontSendNotification);
+            setSeqTernaryParam (false);
+        };
+        seqTernaryBtn->onClick = [this]
+        {
+            seqBinaryBtn ->setToggleState (false, juce::dontSendNotification);
+            seqTernaryBtn->setToggleState (true,  juce::dontSendNotification);
+            setSeqTernaryParam (true);
+        };
+
+        seqBinaryLabel.setText  ("4/4",  juce::dontSendNotification);
+        seqTernaryLabel.setText ("3/4", juce::dontSendNotification);
+        seqBinaryLabel.setJustificationType  (juce::Justification::centredLeft);
+        seqTernaryLabel.setJustificationType (juce::Justification::centredLeft);
+        seqBinaryLabel.setColour  (juce::Label::textColourId, SetupUI::labelsColor);
+        seqTernaryLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible (seqBinaryLabel);
+        addAndMakeVisible (seqTernaryLabel);
+
+        // Step buttons — backed by individual APVTS bools.
+        for (int s = 0; s < maxSeqSteps; ++s)
+        {
+            seqStepBtn[s] = std::make_unique<LedToggleButton> (
+                juce::String (s + 1), SetupUI::LedColour::Orange);
+            seqStepBtn[s]->setClickingTogglesState (true);
+            addAndMakeVisible (*seqStepBtn[s]);
+            seqStepAttach[s] = std::make_unique<ButtonAttachment> (
+                apvts, "delaySeqStep" + juce::String (s), *seqStepBtn[s]);
+        }
+
         startTimerHz (20);
     }
 
@@ -198,6 +248,9 @@ public:
             delayRouteChannelAttach[r].reset();
             delayRouteTransposeAttach[r].reset();
         }
+
+        for (int s = 0; s < maxSeqSteps; ++s)
+            seqStepAttach[s].reset();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -257,12 +310,14 @@ public:
 
         content.removeFromTop (14);
 
+        constexpr float btnW  = 20.0f;
+
         // ── EG Shaping radio rows ─────────────────────────────────────────────
-        // Row A:  [●] EG Volume   [●] EG Track Level
+        // Row A:  [●] EG Volume   [●] EG Trk Level
         // Row B:  [●] Per Note EG
         // Two rows keep each label readable without widening the panel.
         {
-            constexpr float btnW  = 20.0f;
+            
             constexpr float lblW  = 76.0f;
             constexpr float gap   = 8.0f;
 
@@ -298,7 +353,70 @@ public:
 
         }
 
-        content.removeFromTop (10);
+        content.removeFromTop (24);
+
+        // ── Step sequencer sub-frame ──────────────────────────────────────────
+        // Two rows inside a GroupComponent titled "Echo Seq":
+        //   Row 1: Binary / Ternary radio pair
+        //   Row 2: step buttons (8 or 6 depending on mode)
+        {
+            const bool ternary    = apvts.getRawParameterValue ("delaySeqTernary")->load() > 0.5f;
+            const int  activeSteps = ternary ? 6 : maxSeqSteps;
+
+            // Total height: group title area (20) + ternary row + gap + steps row + bottom pad
+            const int seqInnerH = rowHeight + 16 + rowHeight + 16;   // two rows + gap
+            const int seqGroupH = 20 + seqInnerH + 8;          // title + content + bottom pad
+            auto seqGroupArea = content.removeFromTop (seqGroupH);
+            seqGroup.setBounds (seqGroupArea);
+
+            // Content area inside the frame
+            auto seqContent = seqGroupArea.reduced (8, 4);
+            seqContent.removeFromTop (16);  // clear the title text area
+
+            // Row 1: Binary [●]  [●] Ternary
+            {
+                auto row = seqContent.removeFromTop (rowHeight);
+                juce::FlexBox fb;
+                fb.flexDirection  = juce::FlexBox::Direction::row;
+                fb.alignItems     = juce::FlexBox::AlignItems::center;
+                fb.justifyContent = juce::FlexBox::JustifyContent::center;
+                fb.items.add (juce::FlexItem (*seqBinaryBtn)
+                                  .withWidth (btnW).withHeight ((float)(rowHeight - 4))
+                                  .withMargin ({ 0, 4, 0, 4 }));
+                fb.items.add (juce::FlexItem (seqBinaryLabel)
+                                  .withWidth (48.0f).withHeight ((float) rowHeight)
+                                  .withMargin ({ 0, 0, 0, 12 }));
+                fb.items.add (juce::FlexItem (*seqTernaryBtn)
+                                  .withWidth (btnW).withHeight ((float)(rowHeight - 4))
+                                  .withMargin ({ 0, 4, 0, 4 }));
+                fb.items.add (juce::FlexItem (seqTernaryLabel)
+                                  .withWidth (48.0f).withHeight ((float) rowHeight));
+                fb.performLayout (row.toFloat());
+            }
+
+            seqContent.removeFromTop (16);
+
+            // Row 2: step buttons, equally spaced
+            {
+                auto row = seqContent.removeFromTop (rowHeight);
+                juce::FlexBox fb;
+                fb.flexDirection  = juce::FlexBox::Direction::row;
+                fb.alignItems     = juce::FlexBox::AlignItems::center;
+                fb.justifyContent = juce::FlexBox::JustifyContent::center;
+                for (int s = 0; s < maxSeqSteps; ++s)
+                {
+                    const bool visible = (s < activeSteps);
+                    seqStepBtn[s]->setVisible (visible);
+                    if (visible)
+                        fb.items.add (juce::FlexItem (*seqStepBtn[s])
+                                          .withWidth (btnW * 1.5).withHeight (btnW * 1.5)
+                                          .withMargin ({ 3, 3, 3, 3 }));
+                }
+                fb.performLayout (row.toFloat());
+            }
+        }
+
+        content.removeFromTop (6);
 
         // ── Output route rows ─────────────────────────────────────────────────
         // Each row: [Route N label | Channel combobox | Transpose slider]
@@ -422,31 +540,6 @@ private:
                         delayRouteChannelBox[r].setItemEnabled (ch + 1, true);
             }
 
-            // Sibling-route exclusion: grey any channel already selected by
-            // another delay route, regardless of EG shaping state.
-            // This is independent of the LFO/EG block above.
-            {
-                std::array<int, maxRoutes> routeCh {};
-                for (int r = 0; r < maxRoutes; ++r)
-                    routeCh[r] = (int) apvts.getRawParameterValue (
-                        "delayRoute" + juce::String (r) + "_channel")->load(); // 0=Disabled, 1..16
-
-                for (int r = 0; r < maxRoutes; ++r)
-                    for (int ch = 1; ch <= 16; ++ch)
-                    {
-                        // Check whether any sibling route holds this channel.
-                        bool takenBySibling = false;
-                        for (int s = 0; s < maxRoutes; ++s)
-                            if (s != r && routeCh[s] == ch)
-                                { takenBySibling = true; break; }
-
-                        if (takenBySibling)
-                            delayRouteChannelBox[r].setItemEnabled (ch + 1, false);
-                        // (enabling is already handled by the block above;
-                        //  we only ever add restrictions here, never lift them)
-                    }
-            }
-
             // Also enforce on every timer tick so routes set before egShape was
             // activated are cleaned up even without a button click.
             enforceDelayRouteConflicts();
@@ -506,6 +599,46 @@ private:
         if (egTrackLvlBtn) egTrackLvlBtn->setAlpha (aEgShape);
         egVolumeBtnLabel.setAlpha (aEgShape);
         egTrackLvlBtnLabel.setAlpha (aEgShape);
+
+        // Step sequencer: gated by master delay enabled flag.
+        const bool ternary    = apvts.getRawParameterValue ("delaySeqTernary")->load() > 0.5f;
+        const int  activeSteps = ternary ? 6 : maxSeqSteps;
+
+        // Sync radio pair toggle states from APVTS (handles automation / preset recall).
+        if (seqBinaryBtn)
+        {
+            seqBinaryBtn ->setToggleState (!ternary, juce::dontSendNotification);
+            seqBinaryBtn ->setEnabled (enabled);
+            seqBinaryBtn ->setAlpha (a);
+        }
+        if (seqTernaryBtn)
+        {
+            seqTernaryBtn->setToggleState (ternary,  juce::dontSendNotification);
+            seqTernaryBtn->setEnabled (enabled);
+            seqTernaryBtn->setAlpha (a);
+        }
+        seqBinaryLabel.setEnabled (enabled);
+        seqTernaryLabel.setEnabled (enabled);
+        seqBinaryLabel.setAlpha (a);
+        seqTernaryLabel.setAlpha (a);
+
+        for (int s = 0; s < maxSeqSteps; ++s)
+        {
+            const bool stepVisible = (s < activeSteps);
+            seqStepBtn[s]->setVisible (stepVisible);
+            if (stepVisible)
+            {
+                seqStepBtn[s]->setEnabled (enabled);
+                seqStepBtn[s]->setAlpha (a);
+            }
+        }
+
+        // Trigger a layout refresh when ternary mode changes (step buttons show/hide).
+        if (ternary != lastSeqTernary)
+        {
+            lastSeqTernary = ternary;
+            resized();
+        }
     }
 
     // ── Slider setup helpers ──────────────────────────────────────────────────
@@ -599,6 +732,17 @@ private:
         }
     }
 
+    void setSeqTernaryParam (bool ternary)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*> (
+                apvts.getParameter ("delaySeqTernary")))
+        {
+            p->beginChangeGesture();
+            *p = ternary;
+            p->endChangeGesture();
+        }
+    }
+
     // ── Cross-module conflict enforcement ─────────────────────────────────────
     //
     // Called from onClick (immediate) and from updateDelayUiEnabledState (20 Hz).
@@ -607,63 +751,44 @@ private:
     // This is the only place that writes to delayRoute{r}_channel.
     void enforceDelayRouteConflicts()
     {
-        // ── Rule 1: cross-module (LFO / EG) — only relevant when EG shaping active ──
         const int egShape = static_cast<int> (
             apvts.getRawParameterValue ("delayEgShape")->load());
 
-        std::array<bool, 17> blockedByModule {};
+        if (egShape == 0)
+            return; // nothing to enforce when shaping is off
 
-        if (egShape > 0)
+        const int targetGlobalIdx = findGlobalParamByName (
+            egShape == 1 ? "Amp: Volume" : "Track Level");
+
+        // Build the blocked channel set (same logic as the greying block).
+        std::array<bool, 17> blocked {};
+
+        for (int r = 0; r < maxRoutes; ++r)
         {
-            const int targetGlobalIdx = findGlobalParamByName (
-                egShape == 1 ? "Amp: Volume" : "Track Level");
-
-            for (int r = 0; r < maxRoutes; ++r)
-            {
-                const auto rs   = juce::String (r);
-                const int lfoCh = (int) apvts.getRawParameterValue ("route"    + rs + "_channel")->load();
-                const int lfoP  = (int) apvts.getRawParameterValue ("route"    + rs + "_param"  )->load();
-                if (lfoCh > 0 && lfoP == targetGlobalIdx)
-                    blockedByModule[lfoCh] = true;
-            }
-
-            for (int r = 0; r < maxRoutes; ++r)
-            {
-                const auto rs  = juce::String (r);
-                const int egCh   = (int) apvts.getRawParameterValue ("egRoute" + rs + "_channel")->load();
-                if (egCh <= 0) continue;
-                const int egDest = (int) apvts.getRawParameterValue ("egRoute" + rs + "_dest"   )->load();
-                if (mapEgChoiceToGlobal (egDest) == targetGlobalIdx)
-                    blockedByModule[egCh] = true;
-            }
+            const auto rs   = juce::String (r);
+            const int lfoCh = (int) apvts.getRawParameterValue ("route"    + rs + "_channel")->load();
+            const int lfoP  = (int) apvts.getRawParameterValue ("route"    + rs + "_param"  )->load();
+            if (lfoCh > 0 && lfoP == targetGlobalIdx)
+                blocked[lfoCh] = true;
         }
 
-        // ── Snapshot current delay route channels ────────────────────────────
-        std::array<int, maxRoutes> routeCh {};
-        for (int r = 0; r < maxRoutes; ++r)
-            routeCh[r] = (int) apvts.getRawParameterValue (
-                "delayRoute" + juce::String (r) + "_channel")->load();
-
-        // ── Apply both rules; lowest-index route wins for duplicates ─────────
         for (int r = 0; r < maxRoutes; ++r)
         {
-            const int ch = routeCh[r];
-            if (ch <= 0) continue;   // already Disabled
+            const auto rs  = juce::String (r);
+            const int egCh   = (int) apvts.getRawParameterValue ("egRoute" + rs + "_channel")->load();
+            if (egCh <= 0) continue;
+            const int egDest = (int) apvts.getRawParameterValue ("egRoute" + rs + "_dest"   )->load();
+            if (mapEgChoiceToGlobal (egDest) == targetGlobalIdx)
+                blocked[egCh] = true;
+        }
 
-            bool mustDisable = false;
+        // For each delay route, if its current channel is blocked, write Disabled (0).
+        for (int r = 0; r < maxRoutes; ++r)
+        {
+            const int currentCh = (int) apvts.getRawParameterValue (
+                "delayRoute" + juce::String (r) + "_channel")->load();
 
-            // Rule 1: cross-module block (only active when egShape > 0)
-            if (blockedByModule[ch])
-                mustDisable = true;
-
-            // Rule 2: duplicate delay channel — a lower-index route already
-            // holds this channel; Syntakt tracks are monophonic so duplicates
-            // are always wrong regardless of EG shaping state.
-            if (!mustDisable)
-                for (int s = 0; s < r; ++s)
-                    if (routeCh[s] == ch) { mustDisable = true; break; }
-
-            if (mustDisable)
+            if (currentCh > 0 && blocked[currentCh])
             {
                 if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
                         apvts.getParameter ("delayRoute" + juce::String (r) + "_channel")))
@@ -672,7 +797,6 @@ private:
                     *p = 0; // 0 = Disabled in the choice list
                     p->endChangeGesture();
                 }
-                routeCh[r] = 0; // update local snapshot so later routes see the cleared value
             }
         }
     }
@@ -747,6 +871,21 @@ private:
     std::unique_ptr<LedToggleButton> egVolumeBtn, egTrackLvlBtn, egPerNoteBtn;
     juce::Label egVolumeBtnLabel, egTrackLvlBtnLabel, egPerNoteBtnLabel;
     std::unique_ptr<ButtonAttachment> egPerNoteAttach; // only egPerNoteBtn uses an attachment
+
+    // Step sequencer sub-frame + controls
+    // maxSeqSteps must match Params::maxSteps in DelayEngine.h (both = 8).
+    static constexpr int maxSeqSteps = 8;
+
+    juce::GroupComponent              seqGroup;   // "Echo Seq" sub-frame
+
+    // Binary / Ternary radio pair (no APVTS attachment — written manually via setSeqTernaryParam)
+    std::unique_ptr<LedToggleButton>  seqBinaryBtn,  seqTernaryBtn;
+    juce::Label                       seqBinaryLabel, seqTernaryLabel;
+
+    std::array<std::unique_ptr<LedToggleButton>,  maxSeqSteps> seqStepBtn;
+    std::array<std::unique_ptr<ButtonAttachment>, maxSeqSteps> seqStepAttach;
+
+    bool lastSeqTernary = false; // tracks ternary state to trigger resized()
 
     // Look & Feel instances (one per slider colour)
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };

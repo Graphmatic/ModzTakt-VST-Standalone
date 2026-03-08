@@ -27,7 +27,9 @@ public:
         addAndMakeVisible(lfoGroup);
 
         // Sync Mode
-        syncModeLabel.setText("Sync Source:", juce::dontSendNotification);
+        syncModeLabel.setText("Sync Source", juce::dontSendNotification);
+        syncModeLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+
         addAndMakeVisible(syncModeLabel);
         addAndMakeVisible(syncModeBox);
         syncModeBox.addItem("Free", 1);
@@ -93,6 +95,8 @@ public:
         // BPM Display
         addAndMakeVisible(bpmLabelTitle);
         bpmLabelTitle.setText("BPM:", juce::dontSendNotification);
+        bpmLabelTitle.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+
         bpmLabelTitle.setVisible(syncModeBox.getSelectedId() == 2 ? true : false);
         
         addAndMakeVisible(bpmLabel);
@@ -121,6 +125,8 @@ public:
 
         // Sync Division
         divisionLabel.setText("Tempo Divider:", juce::dontSendNotification);
+        divisionLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+
         addAndMakeVisible(divisionLabel);
 
         divisionBox.addItem("1/1", 1);
@@ -140,7 +146,9 @@ public:
         divisionBox.setSelectedId(3); // default quarter note
 
          // Shape
-        shapeLabel.setText("LFO Shape:", juce::dontSendNotification);
+        shapeLabel.setText("LFO Shape", juce::dontSendNotification);
+        shapeLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+
         addAndMakeVisible(shapeLabel);
         addAndMakeVisible(shapeBox);
         shapeBox.addItem("Sine", 1);
@@ -154,6 +162,7 @@ public:
 
         // Rate
         rateLabel.setText("Rate:", juce::dontSendNotification);
+        rateLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible(rateLabel);
         
         addAndMakeVisible(rateSlider);
@@ -170,6 +179,8 @@ public:
 
         // Depth
         depthLabel.setText("Depth:", juce::dontSendNotification);
+        depthLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+
         addAndMakeVisible(depthLabel);
 
         addAndMakeVisible(depthSlider);
@@ -299,6 +310,7 @@ public:
 
             // Label
             routeLabels[i].setText("Route " + juce::String(i + 1), juce::dontSendNotification);
+            routeLabels[i].setColour (juce::Label::textColourId, SetupUI::labelsColor);
             addAndMakeVisible(routeLabels[i]);
 
             // Channel box: must match APVTS choice order: Disabled, Ch1..Ch16

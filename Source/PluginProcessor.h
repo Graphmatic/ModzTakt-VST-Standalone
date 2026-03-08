@@ -161,7 +161,6 @@ public:
         const double blockDurationMs = 1000.0 * (double) audio.getNumSamples() / juce::jmax (1.0, getSampleRate());
 
         currentBlockStartMs = blockStartMs;
-        msPerSample = 1000.0 / juce::jmax (1.0, getSampleRate());
 
         // timeMs is advanced at the end of the block so we can compute per-sample timestamps
         // for throttling / scheduling when needed.
@@ -686,6 +685,16 @@ public:
             delayParams.routeTranspose[r] = (int) apvts.getRawParameterValue("delayRoute" + juce::String(r) + "_transpose")->load();
         }
 
+        // Step sequencer: the sequencer is "active" as long as at least one step
+        // is muted — if every step is true the gate is transparent.
+        // seqEnabled is always set to true here so the engine can evaluate the
+        // pattern; whether any step is muted is what changes behaviour in practice.
+        delayParams.seqEnabled = true;
+        delayParams.seqTernary = apvts.getRawParameterValue ("delaySeqTernary")->load() > 0.5f;
+        for (int s = 0; s < modztakt::delay::Params::maxSteps; ++s)
+            delayParams.seqSteps[s] =
+                apvts.getRawParameterValue ("delaySeqStep" + juce::String (s))->load() > 0.5f;
+
         delayEngine.setParams(delayParams);
 
         // Per-note EG: driven by "delayEgPerNote" independently of "delayEgShape",
@@ -704,7 +713,6 @@ public:
         
         delayEngine.setParams (pne);
         
-
         //======================================================================
         // LFO GENERATION
         //======================================================================
@@ -1087,7 +1095,6 @@ private:
 
     // Helpers for per-sample scheduling (updated each processBlock)
     double currentBlockStartMs = 0.0;
-    double msPerSample = 0.0;
     double timeMs = 0.0;
 
     static constexpr int maxRoutes = 3;
@@ -1171,7 +1178,7 @@ private:
     }
 
     // "Amp: Volume"  → CC 7 (or NRPN, depending on the table entry)
-    static inline const int delayEgVolumeParamIdx = findSyntaktParamIndexByName("Amp: Volume");
+    static inline const int delayEgVolumeParamIdx = findSyntaktParamIndexByName("Knob A");
 
     // "Track Level"  → CC 95 (or NRPN, depending on the table entry)
     static inline const int delayEgTrackLvlParamIdx = findSyntaktParamIndexByName ("Track Level");
@@ -1492,6 +1499,20 @@ private:
                 -24, 24, 0
             ));
         }
+
+        // ── Step sequencer ────────────────────────────────────────────────────────
+        // Ternary mode: false = 8-step loop (binary rhythms),
+        //               true  = 6-step loop (ternary / triplet rhythms)
+        p.push_back (std::make_unique<juce::AudioParameterBool>(
+            "delaySeqTernary", "Delay Seq Ternary", false));
+
+        // Individual step gates — 8 bools, all ON by default.
+        // Steps 6 and 7 are ignored when delaySeqTernary is true.
+        for (int s = 0; s < 8; ++s)
+            p.push_back (std::make_unique<juce::AudioParameterBool>(
+                "delaySeqStep" + juce::String (s),
+                "Delay Seq Step " + juce::String (s + 1),
+                true));   // default: all steps active
 
 
         // SETTINGS MENU PARAMETERS (Performance)

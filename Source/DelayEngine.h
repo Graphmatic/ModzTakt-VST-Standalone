@@ -74,6 +74,18 @@ namespace modztakt::delay
         // using the parameters below (copied from the main EG APVTS params).
         bool perNoteEg = false;
         modztakt::eg::Params noteEgParams;
+
+        // Step sequencer: when seqEnabled is true, each echo index is looked up
+        // in seqSteps[echoIdx % stepCount] before being queued.  A false entry
+        // silently skips that echo (no note-on / note-off scheduled).
+        // stepCount is 6 when seqTernary is true, 8 otherwise.
+        // All steps default to true so the sequencer is transparent when enabled
+        // but no step has been manually muted.
+        static constexpr int maxSteps = 8;
+        bool seqEnabled  = false;
+        bool seqTernary  = false;  // false = 8-step (binary), true = 6-step (ternary)
+        std::array<bool, maxSteps> seqSteps { true, true, true, true,
+                                              true, true, true, true };
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -200,6 +212,25 @@ namespace modztakt::delay
 
                 if (echoVel < (1.0f / 127.0f))
                     break;
+
+                // Step sequencer gate: when enabled, look up whether this echo
+                // index (mod stepCount) is active.
+                // - Muted steps are skipped (no ScheduledNote created), BUT
+                //   echoVel is NOT decayed again for a muted step — only the
+                //   advance from the top of the loop counts.  This keeps the
+                //   velocity chain consistent regardless of the mute pattern;
+                //   otherwise dense muting would exhaust the budget too fast
+                //   and cut off later active echoes prematurely.
+                if (params.seqEnabled)
+                {
+                    const int stepCount = params.seqTernary ? 6 : Params::maxSteps;
+                    // Shift by 1: echo 0 → button 1, echo (stepCount-1) → button 0.
+                    // Button 0 therefore controls the first echo of the *next* loop
+                    // iteration — aligning with bar-start when sync is active.
+                    const int stepIdx = (echoIdx + 1) % stepCount;
+                    if (!params.seqSteps[stepIdx])
+                        continue;
+                }
 
                 const double onMs  = blockStartMs + static_cast<double> (echoIdx + 1) * delayMs;
                 const double offMs = onMs + tentativeDurMs;
@@ -491,13 +522,13 @@ namespace modztakt::delay
     private:
         // Convert an absolute timestamp to a sample offset within the current block.
         static int msToSampleOffset (double eventMs, double blockStartMs,
-                                     double msPerSample, int numSamples) noexcept
+                                     double msPrSample, int numSamples) noexcept
         {
-            if (msPerSample <= 0.0)
+            if (msPrSample <= 0.0)
                 return 0;
 
             const int offset = static_cast<int> (
-                std::round ((eventMs - blockStartMs) / msPerSample));
+                std::round ((eventMs - blockStartMs) / msPrSample));
 
             return juce::jlimit (0, juce::jmax (0, numSamples - 1), offset);
         }
