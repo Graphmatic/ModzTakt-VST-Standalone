@@ -155,7 +155,7 @@
  #define JucePlugin_ARAFactoryID           "com.SoundBreakfast.ModzTakt.factory"
 #endif
 #ifndef  JucePlugin_ARADocumentArchiveID
- #define JucePlugin_ARADocumentArchiveID   "com.SoundBreakfast.ModzTakt.aradocumentarchive.0.0001"
+ #define JucePlugin_ARADocumentArchiveID   "com.SoundBreakfast.ModzTakt.aradocumentarchive.0.3"
 #endif
 #ifndef  JucePlugin_ARACompatibleArchiveIDs
  #define JucePlugin_ARACompatibleArchiveIDs  ""
