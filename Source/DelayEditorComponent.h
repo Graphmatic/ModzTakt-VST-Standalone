@@ -229,7 +229,7 @@ public:
         }
 
         // ── Auto-pan ─────────────────────────────────────────────────────────
-        panEnableBtn = std::make_unique<LedToggleButton> ("Pan", SetupUI::LedColour::Blue);
+        panEnableBtn = std::make_unique<LedToggleButton> ("Auto-Pan", SetupUI::LedColour::Blue);
         panEnableBtn->setClickingTogglesState (true);
         addAndMakeVisible (*panEnableBtn);
         panEnableAttach = std::make_unique<ButtonAttachment> (apvts, "delayPanEnabled", *panEnableBtn);
@@ -433,7 +433,7 @@ public:
             }
         }
 
-        content.removeFromTop (24);
+        content.removeFromTop (28);
 
         // ── Pan row: [●] Pan  [──── Width ────]
         {
