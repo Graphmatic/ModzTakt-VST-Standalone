@@ -446,7 +446,7 @@ public:
                               .withWidth (btnW).withHeight ((float)(rowHeight - 4))
                               .withMargin ({ 0, 4, 0, 4 }));
             fb.items.add (juce::FlexItem (panEnableLabel)
-                              .withWidth (34.0f).withHeight ((float) rowHeight)
+                              .withWidth (80.0f).withHeight ((float) rowHeight)
                               .withMargin ({ 0, 0, 0, 8 }));
             fb.items.add (juce::FlexItem (panWidthSlider)
                               .withFlex (1.0f).withHeight ((float) rowHeight));
