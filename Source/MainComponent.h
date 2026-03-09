@@ -1251,6 +1251,27 @@ private:
             if (dCh == channel)
                 return true;
         }
+
+        // Delay auto-pan claims "Amp: Pan" on every active delay route channel.
+        const bool delayPanEnabled =
+            apvts.getRawParameterValue ("delayPanEnabled")->load() > 0.5f;
+
+        if (delayPanEnabled)
+        {
+            const int panGlobalIdx = findGlobalParamByName ("Amp: Pan");
+            if (globalParamIdx == panGlobalIdx)
+            {
+                for (int dr = 0; dr < modztakt::delay::maxDelayRoutes; ++dr)
+                {
+                    const int dCh = (int) apvts.getRawParameterValue (
+                        "delayRoute" + juce::String (dr) + "_channel")->load();
+                    if (dCh == channel)
+                        return true;
+                }
+            }
+        }
+
+        return false;
         return false;
     }
 

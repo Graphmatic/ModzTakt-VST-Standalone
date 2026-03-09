@@ -228,6 +228,20 @@ public:
                 apvts, "delaySeqStep" + juce::String (s), *seqStepBtn[s]);
         }
 
+        // ── Auto-pan ─────────────────────────────────────────────────────────
+        panEnableBtn = std::make_unique<LedToggleButton> ("Pan", SetupUI::LedColour::Blue);
+        panEnableBtn->setClickingTogglesState (true);
+        addAndMakeVisible (*panEnableBtn);
+        panEnableAttach = std::make_unique<ButtonAttachment> (apvts, "delayPanEnabled", *panEnableBtn);
+
+        panEnableLabel.setText ("Pan", juce::dontSendNotification);
+        panEnableLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        addAndMakeVisible (panEnableLabel);
+
+        panWidthAttach = std::make_unique<SliderAttachment> (apvts, "delayPanWidth", panWidthSlider);
+        setupPanWidthSlider();
+
+
         startTimerHz (20);
     }
 
@@ -251,6 +265,9 @@ public:
 
         for (int s = 0; s < maxSeqSteps; ++s)
             seqStepAttach[s].reset();
+
+        panEnableAttach.reset();
+        panWidthAttach.reset();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -416,7 +433,26 @@ public:
             }
         }
 
-        content.removeFromTop (6);
+        content.removeFromTop (24);
+
+        // ── Pan row: [●] Pan  [──── Width ────]
+        {
+            auto row = content.removeFromTop (rowHeight);
+            juce::FlexBox fb;
+            fb.flexDirection  = juce::FlexBox::Direction::row;
+            fb.alignItems     = juce::FlexBox::AlignItems::center;
+            fb.justifyContent = juce::FlexBox::JustifyContent::flexStart;
+            fb.items.add (juce::FlexItem (*panEnableBtn)
+                              .withWidth (btnW).withHeight ((float)(rowHeight - 4))
+                              .withMargin ({ 0, 4, 0, 4 }));
+            fb.items.add (juce::FlexItem (panEnableLabel)
+                              .withWidth (34.0f).withHeight ((float) rowHeight)
+                              .withMargin ({ 0, 0, 0, 8 }));
+            fb.items.add (juce::FlexItem (panWidthSlider)
+                              .withFlex (1.0f).withHeight ((float) rowHeight));
+            fb.performLayout (row.toFloat());
+            content.removeFromTop (6);
+        }
 
         // ── Output route rows ─────────────────────────────────────────────────
         // Each row: [Route N label | Channel combobox | Transpose slider]
@@ -486,6 +522,12 @@ private:
         const bool rateEditable = enabled && !synced;
         delayRateSlider.setEnabled (rateEditable);
         delayRateLabel.setEnabled (rateEditable);
+
+        if (panEnableBtn) panEnableBtn->setEnabled (enabled);
+        panEnableLabel.setEnabled (enabled);
+        const bool panEnabled = enabled &&
+            apvts.getRawParameterValue ("delayPanEnabled")->load() > 0.5f;
+        panWidthSlider.setEnabled (panEnabled);
 
         for (int r = 0; r < maxRoutes; ++r)
         {
@@ -565,6 +607,12 @@ private:
                     }
             }
 
+            // Pan conflict: when delayPanEnabled, grey "Amp: Pan" in LFO and EG
+            // route destination boxes for any channel occupied by a delay route.
+            // The actual greying happens in MainComponent and EnvelopeEditorComponent
+            // via their 20 Hz timer refresh — here we just fire enforceDelayRouteConflicts()
+            // which is already called above.  The pan conflict is read-only from this side.
+
             // Also enforce on every timer tick so routes set before egShape was
             // activated are cleaned up even without a button click.
             enforceDelayRouteConflicts();
@@ -610,6 +658,10 @@ private:
         delayRateSlider.setAlpha (aRate);
         delayRateLabel.setAlpha (aRate);
         feedbackSlider.setAlpha (a);
+
+        if (panEnableBtn) panEnableBtn->setAlpha (a);
+        panEnableLabel.setAlpha (a);
+        panWidthSlider.setAlpha (panEnabled ? 1.0f : 0.45f);
 
         for (int r = 0; r < maxRoutes; ++r)
         {
@@ -740,6 +792,20 @@ private:
         };
 
         s.updateText();
+    }
+
+    void setupPanWidthSlider()
+    {
+        addAndMakeVisible (panWidthSlider);
+        panWidthSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+        panWidthSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
+        panWidthSlider.setLookAndFeel (&lookBlue);
+        panWidthSlider.setRange (0.0, 1.0, 0.01);
+        panWidthSlider.textFromValueFunction = [] (double v) -> juce::String
+        {
+            return juce::String (static_cast<int> (std::round (v * 100.0))) + " %";
+        };
+        panWidthSlider.updateText();
     }
 
     // Write the delayEgShape choice index to APVTS.
@@ -916,6 +982,13 @@ private:
     std::unique_ptr<LedToggleButton> egVolumeBtn, egTrackLvlBtn, egPerNoteBtn;
     juce::Label egVolumeBtnLabel, egTrackLvlBtnLabel, egPerNoteBtnLabel;
     std::unique_ptr<ButtonAttachment> egPerNoteAttach; // only egPerNoteBtn uses an attachment
+
+    // Auto-pan controls
+    std::unique_ptr<LedToggleButton>  panEnableBtn;
+    juce::Label                       panEnableLabel;
+    juce::Slider                      panWidthSlider;
+    std::unique_ptr<ButtonAttachment> panEnableAttach;
+    std::unique_ptr<SliderAttachment> panWidthAttach;
 
     // Step sequencer sub-frame + controls
     // maxSeqSteps must match Params::maxSteps in DelayEngine.h (both = 8).

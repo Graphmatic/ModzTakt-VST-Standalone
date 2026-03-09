@@ -86,6 +86,12 @@ namespace modztakt::delay
         bool seqTernary  = false;  // false = 8-step (binary), true = 6-step (ternary)
         std::array<bool, maxSteps> seqSteps { true, true, true, true,
                                               true, true, true, true };
+
+        // Auto-pan: when panEnabled, a pan CC is injected before each echo note-on.
+        // panWidth 0..1 maps to 0..63 deviation from bipolar CC centre (64).
+        // Odd echoes pan left (64 - deviation), even echoes pan right (64 + deviation).
+        bool  panEnabled = false;
+        float panWidth   = 0.5f;                                      
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -130,6 +136,7 @@ namespace modztakt::delay
         double offTimeMs    = 0.0; // absolute time to fire note-off (patchable)
         bool   noteOnFired  = false;
         bool   noteOffFired = false;
+        int    echoIndex    = 0;   // 0-based echo number; used for L/R pan alternation
 
         // Per-note EG — one independent envelope engine per echo.
         // Only active when Params::perNoteEg is true.
@@ -257,6 +264,7 @@ namespace modztakt::delay
                     n.offTimeMs    = offMs;
                     n.noteOnFired  = false;
                     n.noteOffFired = false;
+                    n.echoIndex    = echoIdx;
 
                     // Per-note EG: set a tentative release start so the release
                     // finishes exactly when the MIDI note-off fires.
@@ -360,6 +368,51 @@ namespace modztakt::delay
                     n.channel,
                     msToSampleOffset (n.onTimeMs, blockStartMs, msPerSample, numSamples),
                     0.0f   // EG always starts from silence (reset() before noteOn())
+                });
+            }
+        }
+
+        // ── Pan CC primer — call BEFORE processBlock when panEnabled is true. ──
+        //
+        //    For each echo note-on due this block, appends one PanPrefire entry.
+        //    The processor injects a pan CC at the given sample offset BEFORE
+        //    calling processBlock(), so the synth's pan is set before the note arrives.
+        //
+        //    Odd echoes pan left  (CC centre − deviation).
+        //    Even echoes pan right (CC centre + deviation).
+        // ─────────────────────────────────────────────────────────────────────
+        struct PanPrefire
+        {
+            int channel;
+            int sampleOffset;
+            int panCcValue;   // 0..127, bipolar centre = 64
+        };
+
+        void collectPanPrefires (double                   blockStartMs,
+                                 int                      numSamples,
+                                 std::vector<PanPrefire>& out) const
+        {
+            if (!params.panEnabled || params.panWidth <= 0.0f)
+                return;
+
+            const double blockEndMs  = blockStartMs
+                                     + static_cast<double> (numSamples) * msPerSample;
+            const int    deviation   = juce::roundToInt (params.panWidth * 63.0f);
+
+            for (const auto& n : scheduledNotes)
+            {
+                if (n.noteOnFired || n.onTimeMs >= blockEndMs)
+                    continue;
+
+                // Even echo index → right (+deviation), odd → left (−deviation).
+                const int pan = (n.echoIndex % 2 == 0)
+                              ? juce::jlimit (0, 127, 64 + deviation)
+                              : juce::jlimit (0, 127, 64 - deviation);
+
+                out.push_back ({
+                    n.channel,
+                    msToSampleOffset (n.onTimeMs, blockStartMs, msPerSample, numSamples),
+                    pan
                 });
             }
         }

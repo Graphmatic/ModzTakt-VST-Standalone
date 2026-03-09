@@ -693,6 +693,9 @@ public:
             delayParams.seqSteps[s] =
                 apvts.getRawParameterValue ("delaySeqStep" + juce::String (s))->load() > 0.5f;
 
+        delayParams.panEnabled = apvts.getRawParameterValue ("delayPanEnabled")->load() > 0.5f;
+        delayParams.panWidth   = apvts.getRawParameterValue ("delayPanWidth")  ->load();        
+
         delayEngine.setParams(delayParams);
 
         // Per-note EG: driven by "delayEgPerNote" independently of "delayEgShape",
@@ -911,6 +914,24 @@ public:
         // DELAY MIDI OUTPUT
         // Must run every block (engine advances its internal clock even when idle)
         //======================================================================
+
+        // Auto-pan: inject pan CC before each echo note-on so the synth's pan
+        // register is set before the note event arrives (same prefire pattern as
+        // the per-note EG CC). Pan is not throttled — it must fire every echo.
+        if (delayParams.panEnabled && delayParams.panWidth > 0.0f)
+        {
+            std::vector<modztakt::delay::Engine::PanPrefire> panPrefires;
+            delayEngine.collectPanPrefires (blockStartMs, audio.getNumSamples(), panPrefires);
+            const auto& panParam = syntaktParameters[delayPanParamIdx];
+            for (const auto& pf : panPrefires)
+            {
+                if (panParam.isCC)
+                    midi.addEvent (
+                        juce::MidiMessage::controllerEvent (pf.channel, panParam.ccNumber, pf.panCcValue),
+                        pf.sampleOffset);
+                // (NRPN path omitted — "Amp: Pan" is a CC in SyntaktParameterTable.h)
+            }
+        }
 
         delayEngine.processBlock (audio.getNumSamples(), blockStartMs, midi);
 
@@ -1179,6 +1200,9 @@ private:
 
     // "Track Level"  → CC 95 (or NRPN, depending on the table entry)
     static inline const int delayEgTrackLvlParamIdx = findSyntaktParamIndexByName ("Track Level");
+
+    // "Amp: Pan"  → bipolar CC (centre = 64); used by the Delay auto-pan feature.
+    static inline const int delayPanParamIdx = findSyntaktParamIndexByName ("Amp: Pan");
 
     // Throttle state for outgoing MIDI
     std::unordered_map<int, int>    lastSentValuePerParam;
@@ -1502,6 +1526,16 @@ private:
                 "delaySeqStep" + juce::String (s),
                 "Delay Seq Step " + juce::String (s + 1),
                 true));   // default: all steps active
+
+        // ── Auto-pan ──────────────────────────────────────────────────────────
+        // When enabled, a bipolar pan CC ("Amp: Pan") is sent before each echo
+        // note-on; even echoes pan right, odd echoes pan left.
+        p.push_back (std::make_unique<juce::AudioParameterBool>  (
+            "delayPanEnabled", "Delay Pan", false));
+
+        p.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "delayPanWidth", "Delay Pan Width",
+            juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f));
 
 
         // SETTINGS MENU PARAMETERS (Performance)

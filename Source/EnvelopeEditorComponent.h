@@ -876,6 +876,28 @@ private:
             }
         }
 
+        // conflict with Delay auto-pan:
+        // when delayPanEnabled, the delay engine owns (delayRouteCh, "Amp: Pan").
+        {
+            const bool delayPanEnabled =
+                apvts.getRawParameterValue ("delayPanEnabled")->load() > 0.5f;
+
+            if (delayPanEnabled)
+            {
+                const int panParamIdx = findGlobalParamByName ("Amp: Pan");
+                if (globalParamIdx == panParamIdx)
+                {
+                    for (int dr = 0; dr < maxRoutes; ++dr)
+                    {
+                        const int dCh = (int) apvts.getRawParameterValue (
+                            "delayRoute" + juce::String (dr) + "_channel")->load();
+                        if (dCh == ch)
+                            return false;
+                    }
+                }
+            }
+        }
+
         return true;
     }
 
