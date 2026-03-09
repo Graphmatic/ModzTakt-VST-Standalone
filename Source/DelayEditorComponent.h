@@ -229,12 +229,12 @@ public:
         }
 
         // ── Auto-pan ─────────────────────────────────────────────────────────
-        panEnableBtn = std::make_unique<LedToggleButton> ("Auto-Pan", SetupUI::LedColour::Blue);
+        panEnableBtn = std::make_unique<LedToggleButton> ("Pan", SetupUI::LedColour::Blue);
         panEnableBtn->setClickingTogglesState (true);
         addAndMakeVisible (*panEnableBtn);
         panEnableAttach = std::make_unique<ButtonAttachment> (apvts, "delayPanEnabled", *panEnableBtn);
 
-        panEnableLabel.setText ("Pan", juce::dontSendNotification);
+        panEnableLabel.setText ("Auto-Pan", juce::dontSendNotification);
         panEnableLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible (panEnableLabel);
 
