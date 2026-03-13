@@ -71,7 +71,8 @@
   <EXPORTFORMATS>
     <LINUX_MAKE targetFolder="Builds/LinuxMakefile">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug" targetName="modztakt_dev"/>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="modztakt_dev" headerPath="/usr/include/libusb-1.0"
+                       libraryPath="usb-1.0"/>
         <CONFIGURATION isDebug="0" name="Release" targetName="ModzTakt" linkTimeOptimisation="1"/>
       </CONFIGURATIONS>
       <MODULEPATHS>

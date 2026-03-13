@@ -7,6 +7,19 @@
 #include "DelayEditorComponent.h"
 #include "ScopeModalComponent.h"
 #include "Cosmetic.h"
+// Audi Recorder only available for Linux Standalone version
+//  juce_StandaloneFilterWindow.h is NOT pulled in by <JuceHeader.h>;
+//  it must be included explicitly wherever StandalonePluginHolder
+//  is used.  Keeping it here (MainComponent only) means
+//  AudioRecorderComponent itself stays free of that dependency.
+
+#if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+    #include "OverbridgeEngine.h"       // must come before AudioRecorderComponent
+    #include "AudioRecorderComponent.h"
+    // NOTE: juce_StandaloneFilterWindow.h is no longer needed here.
+    // AudioDeviceManager is no longer injected — the engine owns USB directly.
+#endif
+
 
 class MainComponent : public juce::Component,
                       private juce::Timer,
@@ -445,6 +458,70 @@ public:
         //apvts
         scopeButtonAttach = std::make_unique<ButtonAttachment>(apvts, "scope", scopeButton);
 
+        #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+     
+        // ── Wire MIDI from OverbridgeEngine → PluginProcessor ────
+        //
+        // When the Syntakt is in Overbridge mode, snd-usb-midi is NOT
+        // loaded — JUCE MidiInput goes silent.  MIDI arrives instead
+        // embedded inside the Overbridge USB stream.  The engine
+        // demultiplexes it and fires this callback on its USB thread.
+        //
+        // Replace 'processorRef' with however your MainComponent
+        // reaches the PluginProcessor (e.g. via AudioPluginInstance*,
+        // StandalonePluginHolder::getInstance()->getProcessor(), etc.)
+        //
+        obEngine.setMidiCallback ([this] (const juce::MidiMessage& msg)
+        {
+            // MidiMessageCollector is thread-safe for addMessageToQueue().
+            // Do NOT call any JUCE Component methods here — wrong thread.
+            processor.getMidiCollector().addMessageToQueue (msg);
+        });
+     
+        // ── REC toggle button ─────────────────────────────────────
+        addAndMakeVisible (audioRecorderToggle);
+        audioRecorderToggle.setButtonText ("REC");
+        audioRecorderToggle.setTooltip ("Open Syntakt Overbridge track recorder");
+        audioRecorderToggle.setClickingTogglesState (true);
+        audioRecorderToggle.setColour (juce::TextButton::buttonColourId,
+                                       juce::Colours::transparentBlack);
+        audioRecorderToggle.setColour (juce::TextButton::textColourOffId,
+                                       juce::Colours::lightgrey);
+        audioRecorderToggle.setColour (juce::TextButton::buttonOnColourId,
+                                       juce::Colour (0xff8b0000).withAlpha (0.85f));
+        audioRecorderToggle.setColour (juce::TextButton::textColourOnId,
+                                       juce::Colours::white);
+     
+        audioRecorderToggle.onClick = [this]()
+        {
+            if (audioRecorderToggle.getToggleState())
+            {
+                // OverbridgeEngine is passed directly — no StandalonePluginHolder.
+                audioRecorderPanel =
+                    std::make_unique<AudioRecorderComponent> (obEngine);
+     
+                addAndMakeVisible (audioRecorderPanel.get());
+     
+                constexpr int panelW = 300;
+                constexpr int panelH = 600;
+                const int anchorX = getWidth()  - panelW - 10;
+                const int anchorY = getHeight() - panelH - (10 + 24 + 4 + 24 + 4);
+     
+                audioRecorderPanel->setBounds (anchorX, anchorY, panelW, panelH);
+                audioRecorderPanel->toFront (false);
+            }
+            else
+            {
+                if (audioRecorderPanel)
+                {
+                    removeChildComponent (audioRecorderPanel.get());
+                    audioRecorderPanel.reset();
+                }
+            }
+        };
+     
+        #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
+
         // Settings Button
         addAndMakeVisible(settingsButton);
         settingsButton.setButtonText("Settings");
@@ -838,16 +915,22 @@ public:
         );
         #endif
 
-        // setting button
-        constexpr int size = 24;
-
+        // audio recorder and setting buttons
+        constexpr int size   = 24;
+        constexpr int margin = 10;
         auto bounds = getLocalBounds();
-
-        settingsButton.setBounds(bounds.removeFromBottom(10 + size)
-                                        .removeFromRight(10 + size)
-                                        .removeFromLeft(size)
-                                        .removeFromTop(size));
-
+     
+        auto btnColumn = bounds.removeFromBottom (margin + size * 2 + 4)
+                               .removeFromRight  (margin + size)
+                               .removeFromLeft   (size);
+     
+        settingsButton.setBounds (btnColumn.removeFromBottom (size));
+        btnColumn.removeFromBottom (4);
+     
+        #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+            audioRecorderToggle.setBounds (btnColumn.removeFromBottom (size));
+        #endif
+ 
         settingsButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::darkgrey.withAlpha(0.3f));
         settingsButton.setClickingTogglesState(false);
 
@@ -971,8 +1054,20 @@ private:
 
     std::atomic<bool> pendingSyncModeChange { false };
 
+    //************OVERBRIDGE AUDIO **************************************************//
+    #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+ 
+    // Owned by MainComponent.  Outlives AudioRecorderComponent.
+    // Wire MIDI in the constructor (see step 3).
+    OverbridgeEngine obEngine;
+ 
+    juce::TextButton audioRecorderToggle;
+    std::unique_ptr<AudioRecorderComponent> audioRecorderPanel;
+ 
+    #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
+
     //*******************************  APVTS ****************************************//
-    //*******************************************************************************//
+    
     using SliderAttachment  = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment  = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ChoiceAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -1012,6 +1107,7 @@ private:
 
     // settings - Anti flooding
     double msFloofThreshold = 0.0; // delay between Midi datas chunk
+
 
     void parameterChanged (const juce::String& paramID, float newValue) override
     {

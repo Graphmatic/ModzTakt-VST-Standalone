@@ -78,6 +78,13 @@ public:
 
         // If audio added:
         // engine.prepare(cachedSampleRate, cachedBlockSize);
+
+        // for OverBridge
+        #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+
+            midiCollector.reset(sampleRate);
+            
+        #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
     }
 
     inline void releaseResources() override {}
@@ -142,6 +149,13 @@ public:
         juce::ScopedNoDenormals noDenormals;
         if (isMidiEffect())
             audio.clear();
+
+        // for OverBridge
+        #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+
+            midiCollector.removeNextBlockOfMessages(midi, getBlockSize());
+
+        #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
 
         // Snapshot incoming MIDI before we append generated events
         const juce::MidiBuffer midiIn = midi;
@@ -1104,6 +1118,13 @@ public:
 
     static inline int egMidiDestCount() { return SyntaktParameterEgIndex.size(); }
 
+    // for OverBridge
+    public:
+    juce::MidiMessageCollector& getMidiCollector() noexcept
+    {
+        return midiCollector;
+    }
+
     //==============================================================================
     // PRIVATE IMPLEMENTATION
     //==============================================================================
@@ -1222,6 +1243,9 @@ private:
         }
         return filteredEgDest;
     }();
+
+    // for overbridge MIDI In
+    juce::MidiMessageCollector midiCollector;
     
     //==============================================================================
 
