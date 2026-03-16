@@ -21,6 +21,8 @@ A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or othe
 -- Step sequencer to mute/unmute echoed notes
 -- Auto-Pan for echoed notes
 
+- a graphical interface to record Syntakt audio channels for the Linux Standalone version if SYNTAKT is set to OverBridge Mode. Code is ripped off the existing Dtdump project (https://github.com/droelfdroelf/dtdump), so repectfull thanks, I won't be able to do that without this previous work! Syntakt MIDI In/Out seems to be available independantly, so using audio recording should not break MIDI functionnalities of the app. 
+
 - the Oscilloscope view is gadget, not accurate.
 
 LFO route triggered by EG always run until end of EG cycle.
