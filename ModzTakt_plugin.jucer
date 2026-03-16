@@ -69,10 +69,10 @@
   <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_ALSA="1" JUCE_JACK="0"
                JUCE_VST3_CAN_REPLACE_VST2="0"/>
   <EXPORTFORMATS>
-    <LINUX_MAKE targetFolder="Builds/LinuxMakefile">
+    <LINUX_MAKE targetFolder="Builds/LinuxMakefile" enableGNUExtensions="1" smallIcon="UWx9OR"
+                bigIcon="UWx9OR" extraLinkerFlags="$(shell pkg-config --libs libusb-1.0)">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug" targetName="modztakt_dev" headerPath="/usr/include/libusb-1.0"
-                       libraryPath="usb-1.0"/>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="modztakt_dev"/>
         <CONFIGURATION isDebug="0" name="Release" targetName="ModzTakt" linkTimeOptimisation="1"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
