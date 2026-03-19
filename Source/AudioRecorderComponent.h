@@ -250,19 +250,19 @@ private:
 //
 //  Layout (fixed height kPanelHeight):
 //
-//   ┌─────────────────────────────────────────────────────────┐
-//   │ ⬤ TRACK RECORDER  [status text ...]  [path] [Browse] [●REC] │  ← control bar
-//   ├─────────────────────────────────────────────────────────┤
-//   │  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  │  ← arm LEDs
-//   │  M  M  1  2  3  4  5  6  7  8  9  10 11 12 FX FX DR DR EX EX  │  ← vertical labels
-//   └─────────────────────────────────────────────────────────┘
+//   ┌─────────────────────────────────────────────────────────────┐
+//   │ ⬤ TRACK RECORDER  [status text ...]  [path] [Browse] [REC] │  ← control bar
+//   ├─────────────────────────────────────────────────────────────┤
+//   │  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○ │  ← arm LEDs
+//   │  M  M  1  2  3  4  5  6  7  8  9  10 11 12 FX FX DR DR EX EX│  ← vertical labels
+//   └─────────────────────────────────────────────────────────────┘
 // ============================================================
 class AudioRecorderComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
     // Total height the panel wants in the parent layout
-    static constexpr int kPanelHeight = 148;
+    static constexpr int kPanelHeight = 180;
 
     explicit AudioRecorderComponent (OverbridgeEngine& engine)
         : engine (engine),
@@ -286,7 +286,7 @@ public:
         addAndMakeVisible (statusLabel);
 
         // ── Output directory path ─────────────────────────────
-        outputDirPathLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        outputDirPathLabel.setColour (juce::Label::textColourId, juce::Colour (0xff88c8ff));
         outputDirPathLabel.setJustificationType (juce::Justification::centredRight);
         outputDirPathLabel.setMinimumHorizontalScale (0.6f);
         addAndMakeVisible (outputDirPathLabel);
@@ -294,7 +294,7 @@ public:
 
         // ── Browse button ─────────────────────────────────────
         browseButton.setButtonText ("Browse...");
-        browseButton.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        browseButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff2a2d30));
         browseButton.setColour (juce::TextButton::textColourOffId, juce::Colours::lightgrey);
         browseButton.onClick = [this] { browseForOutputDirectory(); };
         addAndMakeVisible (browseButton);
@@ -348,7 +348,7 @@ public:
 
         // Group title — left-aligned in control bar
         g.setColour (juce::Colours::white.withAlpha (0.55f));
-        g.drawText ("TRACK RECORDER",
+        g.drawText ("OB AUDIO TRACK RECORDER",
                     kTitleX, 0, kTitleW, kControlBarH,
                     juce::Justification::centredLeft, false);
 
@@ -663,7 +663,7 @@ private:
             if (n == 0)
             {
                 g.setColour (SetupUI::labelsColor.withAlpha (0.3f));
-                g.drawText ("Device not connected — plug in Syntakt (Overbridge mode)",
+                g.drawText ("Device not connected - plug in Syntakt (Overbridge mode)",
                             0, 0, getWidth(), getHeight(),
                             juce::Justification::centred, false);
                 return;
@@ -683,7 +683,7 @@ private:
                 {
                     g.setColour (juce::Colour (0xff1a2530).withAlpha (0.5f));
                     g.fillRect (juce::Rectangle<float> (
-                        colW * (float) i, 0.0f, colW, (float) getHeight()));
+                        colW * ((float) i) + 2, 0.0f, colW, (float) getHeight() - 2));
                 }
 
                 // ── Arm LED button ────────────────────────────────
@@ -730,7 +730,7 @@ private:
                 // Draw text rotated -90° (reads bottom to top).
                 // We save/restore the Graphics transform around this.
                 const float labelTop  = btnY + btnDiam + (float) kLabelGap;
-                const float labelH    = (float) getHeight() - labelTop - 2.0f;
+                const float labelH    = (float) getHeight() - labelTop - (float) kBottomMargin;
                 const float labelW    = colW - 2.0f;
 
                 const juce::Colour textCol =
@@ -743,23 +743,25 @@ private:
                 // Apply rotation: pivot = centre of the label area
                 const float pivotX = cx;
                 const float pivotY = labelTop + labelH * 0.5f;
-
-                juce::Graphics::ScopedSaveState ss (g);
-                g.addTransform (juce::AffineTransform::rotation (
-                    -juce::MathConstants<float>::halfPi, pivotX, pivotY));
-
-                // After rotation the bounding rectangle maps to:
-                //   width  becomes labelH (the rotated height)
-                //   height becomes labelW (the rotated width)
-                g.drawText (t.displayName,
-                            (int) (pivotX - labelH * 0.5f),
-                            (int) (pivotY - labelW * 0.5f),
-                            (int) labelH,
-                            (int) labelW,
-                            juce::Justification::centredLeft,
-                            true);
-
-                // ── Column divider ────────────────────────────────
+ 
+                {
+                    juce::Graphics::ScopedSaveState ss (g);
+                    g.addTransform (juce::AffineTransform::rotation (
+                        -juce::MathConstants<float>::halfPi, pivotX, pivotY));
+ 
+                    // After rotation the bounding rectangle maps to:
+                    //   width  becomes labelH (the rotated height)
+                    //   height becomes labelW (the rotated width)
+                    g.drawText (t.displayName,
+                                (int) (pivotX - labelH * 0.5f),
+                                (int) (pivotY - labelW * 0.5f),
+                                (int) labelH,
+                                (int) labelW,
+                                juce::Justification::centredLeft,
+                                true);
+                }   // ← rotation transform released here
+ 
+                // ── Column divider (drawn in normal coords, no rotation) ──
                 if (i > 0)
                 {
                     g.setColour (juce::Colours::white.withAlpha (0.05f));
@@ -774,9 +776,10 @@ private:
         ArmCb onArmToggled;
 
         // Geometry
-        static constexpr int kBtnMaxDiam = 26;  // LED diameter cap (px)
-        static constexpr int kBtnTopPad  = 14;  // space above button (for ch number)
-        static constexpr int kLabelGap   = 5;   // gap between button bottom and label
+        static constexpr int kBtnMaxDiam   = 26;  // LED diameter cap (px)
+        static constexpr int kBtnTopPad    = 14;  // space above button (for ch number)
+        static constexpr int kLabelGap     = 5;   // gap between button bottom and label top
+        static constexpr int kBottomMargin = 10;  // clearance between label text and frame
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelStrip)
     };
