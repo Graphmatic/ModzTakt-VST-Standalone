@@ -17,7 +17,7 @@ public:
         // Choose a sensible initial size. You can match your standalone window later.
         setSize (700, 540);
         setResizable(false, false);      // width only
-        setResizeLimits(1430, 700, 1920, 700); // minW, minH, maxW, maxH
+        setResizeLimits(1430, 900, 1920, 900); // minW, minH, maxW, maxH
     }
 
     inline ~ModzTaktAudioProcessorEditor() override = default;

@@ -2,11 +2,14 @@
 
 // ============================================================
 //  AudioRecorderComponent.h
-//  AVAILABILITY: Linux Standalone build ONLY.
+//  AVAILABILITY: Linux Standalone + MODZTAKT_OVERBRIDGE builds ONLY.
+//  Requires OverbridgeEngine.h and libusb-1.0.
+//  Define MODZTAKT_OVERBRIDGE=1 in the Projucer "Linux Makefile
+//  (Overbridge)" exporter to enable this feature.
 // ============================================================
 #if JUCE_LINUX \
-    && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
-    && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+    && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+    && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
 
 #include <JuceHeader.h>
 #include "Cosmetic.h"
@@ -40,8 +43,6 @@ struct SyntaktAudioTrack
 class WriterThread : public juce::Thread
 {
 public:
-    // Ring buffer capacity: 10 seconds at 48 kHz — large enough that even
-    // if the writer thread sleeps briefly, it never overflows.
     static constexpr int kRingCapacity = 48000 * 10;
 
     explicit WriterThread (int numChannels)
@@ -53,12 +54,6 @@ public:
         ringBuffer.clear();
     }
 
-    // ── Called from the USB callback thread ──────────────────
-
-    /// Push a block of non-interleaved float samples into the ring.
-    /// @param channelData  Array of numChannels pointers, each with numFrames samples.
-    /// @param numChannels  Must match the value passed to the constructor.
-    /// @param numFrames    Number of frames in this block.
     void pushSamples (const float* const* channelData,
                       int                 numChannels,
                       int                 numFrames) noexcept
@@ -68,7 +63,6 @@ public:
         int start1, size1, start2, size2;
         fifo.prepareToWrite (numFrames, start1, size1, start2, size2);
 
-        // If size1+size2 < numFrames the FIFO is full — count dropped frames.
         const int dropped = numFrames - (size1 + size2);
         if (dropped > 0)
             framesDropped.fetch_add (dropped, std::memory_order_relaxed);
@@ -83,23 +77,15 @@ public:
 
         fifo.finishedWrite (size1 + size2);
         framesReceived.fetch_add (size1 + size2, std::memory_order_relaxed);
-
-        // Wake the writer thread immediately instead of waiting for its 2ms poll.
         notify();
     }
 
-    // ── Called from the JUCE message thread ──────────────────
-
-    /// Open one writer per armed channel index.
-    /// @param outputDir      Destination folder.
-    /// @param armedChannels  Indices into the 14-channel layout.
-    /// @param timestamp      Timestamp string used in filenames.
-    bool openWriters (const juce::File&        outputDir,
-                      const std::vector<int>&  armedChannels,
-                      const juce::String&      timestamp)
+    // ── Writer management ─────────────────────────────────────
+    bool openWriters (const juce::File&       outputDir,
+                      const std::vector<int>& armedChannels,
+                      const juce::String&     timestamp)
     {
         closeWriters();
-
         juce::WavAudioFormat wav;
 
         for (int chIdx : armedChannels)
@@ -111,7 +97,7 @@ public:
                 : ("ch" + juce::String (chIdx));
 
             const juce::File file = outputDir.getChildFile (
-                "SYNTAKT-" + timestamp + "-" + name + ".wav");
+                "SYNTAKT_" + timestamp + "_" + name + ".wav");
 
             auto* os = file.createOutputStream().release();
             if (! os)
@@ -126,8 +112,8 @@ public:
             std::unique_ptr<juce::AudioFormatWriter> writer (
                 wav.createWriterFor (os,
                                      OverbridgeEngine::kSampleRate,
-                                     1,       // mono per file
-                                     32,      // 32-bit — matches Syntakt Overbridge native depth
+                                     1,
+                                     32,   // 32-bit — Syntakt Overbridge native depth
                                      {},
                                      0));
             if (! writer)
@@ -172,7 +158,7 @@ public:
             const int total = size1 + size2;
             if (total == 0)
             {
-                wait (1);   // woken by notify() from pushSamples; 1ms fallback
+                wait (1);
                 continue;
             }
 
@@ -193,7 +179,6 @@ public:
             framesWritten.fetch_add (total, std::memory_order_relaxed);
         }
 
-        // Drain any remaining samples before exiting.
         flush();
 
        #if JUCE_DEBUG
@@ -204,19 +189,17 @@ public:
        #endif
     }
 
-        // Diagnostic counters — readable from the message thread
-        std::atomic<int> framesReceived { 0 };
-        std::atomic<int> framesWritten  { 0 };
-        std::atomic<int> framesDropped  { 0 };
+    // Diagnostic counters
+    std::atomic<int> framesReceived { 0 };
+    std::atomic<int> framesWritten  { 0 };
+    std::atomic<int> framesDropped  { 0 };
 
 private:
     void flush()
     {
-        // Drain in chunks to keep memory usage bounded even with a large ring buffer.
         constexpr int kFlushChunk = 4096;
         juce::AudioBuffer<float> mono (1, kFlushChunk);
-
-        int remaining = fifo.getNumReady();
+        int remaining   = fifo.getNumReady();
         int totalFlushed = 0;
 
         while (remaining > 0)
@@ -241,12 +224,12 @@ private:
             remaining    -= got;
         }
 
+       #if JUCE_DEBUG
         if (totalFlushed > 0)
         {
-           #if JUCE_DEBUG
             juce::Logger::writeToLog ("WriterThread: flush() wrote " + juce::String (totalFlushed) + " frames");
-           #endif
         }
+       #endif
     }
 
     const int               numCh;
@@ -262,11 +245,25 @@ private:
 
 // ============================================================
 //  AudioRecorderComponent
+//
+//  Inline panel — sits below the MIDI group panels, full width.
+//
+//  Layout (fixed height kPanelHeight):
+//
+//   ┌─────────────────────────────────────────────────────────┐
+//   │ ⬤ TRACK RECORDER  [status text ...]  [path] [Browse] [●REC] │  ← control bar
+//   ├─────────────────────────────────────────────────────────┤
+//   │  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  │  ← arm LEDs
+//   │  M  M  1  2  3  4  5  6  7  8  9  10 11 12 FX FX DR DR EX EX  │  ← vertical labels
+//   └─────────────────────────────────────────────────────────┘
 // ============================================================
 class AudioRecorderComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
+    // Total height the panel wants in the parent layout
+    static constexpr int kPanelHeight = 148;
+
     explicit AudioRecorderComponent (OverbridgeEngine& engine)
         : engine (engine),
           writerThread (OverbridgeEngine::kNumChannels)
@@ -282,51 +279,27 @@ public:
         propertiesFile = std::make_unique<juce::PropertiesFile> (opts);
         outputDirectory = loadSavedDirectory();
 
-        // ── Title ─────────────────────────────────────────────
-        titleLabel.setText ("Syntakt Track Recorder", juce::dontSendNotification);
-        titleLabel.setFont (juce::Font (14.0f, juce::Font::bold));
-        titleLabel.setColour (juce::Label::textColourId, juce::Colours::white);
-        titleLabel.setJustificationType (juce::Justification::centred);
-        addAndMakeVisible (titleLabel);
-
-        // ── Status ────────────────────────────────────────────
-        statusLabel.setFont (juce::Font (11.0f));
+        // ── Status label ──────────────────────────────────────
         statusLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
-        statusLabel.setJustificationType (juce::Justification::centred);
-        statusLabel.setText ("Scanning…", juce::dontSendNotification);
+        statusLabel.setJustificationType (juce::Justification::centredLeft);
+        statusLabel.setText ("Scanning...", juce::dontSendNotification);
         addAndMakeVisible (statusLabel);
 
-        // ── Output directory ──────────────────────────────────
-        outputDirSectionLabel.setText ("Output Directory", juce::dontSendNotification);
-        outputDirSectionLabel.setFont (juce::Font (11.0f, juce::Font::bold));
-        outputDirSectionLabel.setColour (juce::Label::textColourId,
-                                         juce::Colours::white.withAlpha (0.6f));
-        addAndMakeVisible (outputDirSectionLabel);
-
-        outputDirPathLabel.setFont (juce::Font (11.0f));
-        outputDirPathLabel.setColour (juce::Label::backgroundColourId,
-                                      juce::Colour (0xff141618));
-        outputDirPathLabel.setColour (juce::Label::textColourId,
-                                      juce::Colour (0xff88c8ff));
-        outputDirPathLabel.setMinimumHorizontalScale (1.0f);
-        outputDirPathLabel.setJustificationType (juce::Justification::centredLeft);
+        // ── Output directory path ─────────────────────────────
+        outputDirPathLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+        outputDirPathLabel.setJustificationType (juce::Justification::centredRight);
+        outputDirPathLabel.setMinimumHorizontalScale (0.6f);
         addAndMakeVisible (outputDirPathLabel);
         updateDirPathLabel();
 
-        browseButton.setButtonText ("Browse…");
-        browseButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff2a2d30));
+        // ── Browse button ─────────────────────────────────────
+        browseButton.setButtonText ("Browse...");
+        browseButton.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         browseButton.setColour (juce::TextButton::textColourOffId, juce::Colours::lightgrey);
         browseButton.onClick = [this] { browseForOutputDirectory(); };
         addAndMakeVisible (browseButton);
 
-        // ── Refresh ───────────────────────────────────────────
-        refreshButton.setButtonText ("Refresh");
-        refreshButton.setColour (juce::TextButton::buttonColourId,  juce::Colour (0xff2a2d30));
-        refreshButton.setColour (juce::TextButton::textColourOffId, juce::Colours::lightgrey);
-        refreshButton.onClick = [this] { refreshTracks(); };
-        addAndMakeVisible (refreshButton);
-
-        // ── Record ────────────────────────────────────────────
+        // ── Record button ─────────────────────────────────────
         recordButton.setButtonText (kIdleText);
         recordButton.setClickingTogglesState (true);
         recordButton.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff2a2d30));
@@ -337,13 +310,10 @@ public:
         recordButton.onClick = [this] { onRecordToggled(); };
         addAndMakeVisible (recordButton);
 
-        // ── Track list ────────────────────────────────────────
-        trackListContent = std::make_unique<TrackListContent> (
+        // ── Channel strip ─────────────────────────────────────
+        channelStrip = std::make_unique<ChannelStrip> (
             tracks, [this](int i){ onTrackArmToggled (i); });
-
-        trackViewport.setViewedComponent (trackListContent.get(), false);
-        trackViewport.setScrollBarsShown (true, false);
-        addAndMakeVisible (trackViewport);
+        addAndMakeVisible (*channelStrip);
 
         refreshTracks();
         startTimerHz (1);
@@ -363,45 +333,64 @@ public:
     // ── Layout ────────────────────────────────────────────────
     void paint (juce::Graphics& g) override
     {
-        auto b = getLocalBounds().toFloat();
+        const auto b = getLocalBounds().toFloat();
+
+        // Panel background — matches other group panels
         g.setColour (juce::Colour (0xee191b1e));
         g.fillRoundedRectangle (b, 7.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.setColour (juce::Colours::white);
         g.drawRoundedRectangle (b.reduced (0.5f), 7.0f, 1.0f);
+
+        // Control bar separator
+        const float sepY = (float) kControlBarH;
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.drawHorizontalLine ((int) sepY, 8.0f, (float) getWidth() - 8.0f);
+
+        // Group title — left-aligned in control bar
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.drawText ("TRACK RECORDER",
+                    kTitleX, 0, kTitleW, kControlBarH,
+                    juce::Justification::centredLeft, false);
+
+        // Red record indicator dot when recording
+        if (recordButton.getToggleState())
+        {
+            g.setColour (juce::Colour (0xffff2211).withAlpha (0.85f));
+            const float dotR = 4.0f;
+            g.fillEllipse ((float) kTitleX - 12.0f,
+                           (float) kControlBarH * 0.5f - dotR,
+                           dotR * 2.0f, dotR * 2.0f);
+        }
     }
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced (10);
+        // ── Control bar ───────────────────────────────────────
+        auto bar = getLocalBounds()
+                       .removeFromTop (kControlBarH)
+                       .reduced (8, 0);
 
-        titleLabel.setBounds (area.removeFromTop (22));
-        area.removeFromTop (4);
-        statusLabel.setBounds (area.removeFromTop (30));
-        area.removeFromTop (6);
+        // Reserve title area on the left
+        bar.removeFromLeft (kTitleX + kTitleW - 8);
 
-        outputDirSectionLabel.setBounds (area.removeFromTop (14));
-        area.removeFromTop (3);
-        {
-            auto row = area.removeFromTop (22);
-            browseButton.setBounds (row.removeFromRight (64));
-            row.removeFromRight (4);
-            outputDirPathLabel.setBounds (row);
-        }
-        area.removeFromTop (6);
+        // Record button on the far right
+        recordButton.setBounds (bar.removeFromRight (88).withSizeKeepingCentre (88, 22));
+        bar.removeFromRight (4);
 
-        {
-            auto row = area.removeFromTop (24);
-            recordButton.setBounds (row.removeFromRight (120));
-            row.removeFromRight (4);
-            refreshButton.setBounds (row.removeFromRight (70));
-        }
-        area.removeFromTop (6);
+        // Browse button
+        browseButton.setBounds (bar.removeFromRight (64).withSizeKeepingCentre (64, 22));
+        bar.removeFromRight (4);
 
-        trackViewport.setBounds (area);
-        if (trackListContent)
-            trackListContent->setSize (
-                area.getWidth() - trackViewport.getScrollBarThickness(),
-                trackListContent->getPreferredHeight());
+        // Dir path label fills the gap between title and browse button
+        // Status label takes the left portion, dir label the right
+        const int half = bar.getWidth() / 2;
+        statusLabel.setBounds (bar.removeFromLeft (half));
+        outputDirPathLabel.setBounds (bar);
+
+        // ── Channel strip fills remaining height ──────────────
+        if (channelStrip)
+            channelStrip->setBounds (
+                getLocalBounds().withTrimmedTop (kControlBarH + 2));
     }
 
     // ── Accessors ─────────────────────────────────────────────
@@ -419,8 +408,13 @@ public:
     const juce::File& getOutputDirectory() const noexcept { return outputDirectory; }
 
 private:
-    static constexpr const char* kIdleText   = "● Record";
-    static constexpr const char* kActiveText = "■ Stop";
+    // ── Geometry constants ────────────────────────────────────
+    static constexpr int kControlBarH = 36;
+    static constexpr int kTitleX      = 14;   // left margin for title text
+    static constexpr int kTitleW      = 130;  // width reserved for title
+
+    static constexpr const char* kIdleText   = "RECORD";
+    static constexpr const char* kActiveText = "STOP";
 
     // ── Timer: re-probe once per second when idle ─────────────
     void timerCallback() override
@@ -436,7 +430,6 @@ private:
         const bool ready = (ds == OverbridgeEngine::DeviceState::Ready
                          || ds == OverbridgeEngine::DeviceState::Running);
 
-        // Preserve arm states across re-probes
         std::vector<bool> prevArm (OverbridgeEngine::kNumChannels, false);
         for (const auto& t : tracks)
             if (t.deviceChannelIndex >= 0 && t.deviceChannelIndex < OverbridgeEngine::kNumChannels)
@@ -459,8 +452,9 @@ private:
         }
 
         setStatus (engine.getStatusText());
-        rebuildTrackListUI();
+        if (channelStrip) channelStrip->repaint();
         updateRecordButton();
+        repaint();
     }
 
     // ── Arm toggle ────────────────────────────────────────────
@@ -468,7 +462,7 @@ private:
     {
         if (idx < 0 || idx >= (int) tracks.size()) return;
         tracks[(size_t) idx].isArmed = ! tracks[(size_t) idx].isArmed;
-        if (trackListContent) trackListContent->repaint();
+        if (channelStrip) channelStrip->repaint();
         updateRecordButton();
     }
 
@@ -485,15 +479,12 @@ private:
     // ── Record start / stop ───────────────────────────────────
     void onRecordToggled()
     {
-        if (recordButton.getToggleState())
-            startRecording();
-        else
-            stopRecording();
+        if (recordButton.getToggleState()) startRecording();
+        else                               stopRecording();
     }
 
     void startRecording()
     {
-        // 1. Collect armed channel indices
         std::vector<int> armedIndices;
         for (const auto& t : tracks)
             if (t.isArmed)
@@ -505,39 +496,30 @@ private:
             return;
         }
 
-        // 2. Build timestamp string: YYYY_MM-DD_HH_MM_SS
         const juce::Time now = juce::Time::getCurrentTime();
         const juce::String timestamp =
-            juce::String::formatted ("%04d_%02d_%02d-%02d_%02d_%02d",
+            juce::String::formatted ("%04d_%02d-%02d_%02d_%02d_%02d",
                 now.getYear(), now.getMonth() + 1, now.getDayOfMonth(),
                 now.getHours(), now.getMinutes(), now.getSeconds());
 
-        // 3. Open WAV writers (one file per armed channel)
         if (! writerThread.openWriters (outputDirectory, armedIndices, timestamp))
         {
             juce::AlertWindow::showMessageBoxAsync (
-                juce::AlertWindow::WarningIcon,
-                "Recording error",
+                juce::AlertWindow::WarningIcon, "Recording error",
                 "Could not create output files in:\n" + outputDirectory.getFullPathName()
                 + "\n\nCheck that the folder exists and is writable.");
             recordButton.setToggleState (false, juce::dontSendNotification);
             return;
         }
 
-        // 4. Reset diagnostic counters for this session
         writerThread.framesReceived.store (0, std::memory_order_relaxed);
         writerThread.framesWritten.store  (0, std::memory_order_relaxed);
         writerThread.framesDropped.store  (0, std::memory_order_relaxed);
 
-        // 5. Wire the engine's audio callback → ring buffer
         engine.setAudioCallback (
             [this] (const float* const* samples, int numCh, int numFrames)
-            {
-                // Called on the USB thread — push only, no locks
-                writerThread.pushSamples (samples, numCh, numFrames);
-            });
+            { writerThread.pushSamples (samples, numCh, numFrames); });
 
-        // 6. Start the writer thread first, then the USB capture
         writerThread.startThread (juce::Thread::Priority::normal);
 
         if (! engine.start())
@@ -545,19 +527,17 @@ private:
             writerThread.stopThread (2000);
             writerThread.closeWriters();
             engine.setAudioCallback (nullptr);
-
             juce::AlertWindow::showMessageBoxAsync (
-                juce::AlertWindow::WarningIcon,
-                "Recording error",
+                juce::AlertWindow::WarningIcon, "Recording error",
                 "Failed to start USB capture:\n" + engine.getStatusText());
-
             recordButton.setToggleState (false, juce::dontSendNotification);
             return;
         }
 
         recordButton.setButtonText (kActiveText);
         setStatus ("Recording — " + juce::String ((int) armedIndices.size())
-                   + " channel(s)  →  " + outputDirectory.getFullPathName());
+                   + " ch  →  " + outputDirectory.getFullPathName());
+        repaint();  // refresh recording dot
 
        #if JUCE_DEBUG
         juce::Logger::writeToLog ("AudioRecorder: started recording "
@@ -568,11 +548,8 @@ private:
 
     void stopRecording()
     {
-        // Stop USB capture first (no more audioCallback fires after this returns)
         engine.stop();
         engine.setAudioCallback (nullptr);
-
-        // Stop writer thread (flush() drains remaining ring buffer data to disk)
         writerThread.stopThread (5000);
 
        #if JUCE_DEBUG
@@ -583,11 +560,11 @@ private:
             "  duration=" + juce::String (writerThread.framesWritten.load() / 48000.0, 2) + "s");
        #endif
 
-        // Destroy writers — their destructors finalize the WAV RIFF headers
         writerThread.closeWriters();
-
         recordButton.setButtonText (kIdleText);
-        setStatus ("Stopped.  Files saved to:\n" + outputDirectory.getFullPathName());
+        setStatus ("Saved to  " + outputDirectory.getFullPathName());
+        repaint();
+
        #if JUCE_DEBUG
         juce::Logger::writeToLog ("AudioRecorder: recording stopped.");
        #endif
@@ -621,7 +598,6 @@ private:
     {
         fileChooser = std::make_unique<juce::FileChooser> (
             "Select output directory for recordings", outputDirectory, "", true);
-
         fileChooser->launchAsync (
             juce::FileBrowserComponent::openMode
             | juce::FileBrowserComponent::canSelectDirectories,
@@ -637,107 +613,174 @@ private:
 
     void updateDirPathLabel()
     {
-        outputDirPathLabel.setText (outputDirectory.getFullPathName(),
-                                    juce::dontSendNotification);
-        outputDirPathLabel.setTooltip (outputDirectory.getFullPathName());
+        // Show only the last two path components to keep it compact
+        const juce::String full = outputDirectory.getFullPathName();
+        const juce::String parent = outputDirectory.getParentDirectory().getFileName();
+        const juce::String name   = outputDirectory.getFileName();
+        const juce::String display = (parent.isEmpty() ? full
+                                      : ".../" + parent + "/" + name);
+        outputDirPathLabel.setText (display, juce::dontSendNotification);
+        outputDirPathLabel.setTooltip (full);
     }
 
     void setStatus (const juce::String& t)
     { statusLabel.setText (t, juce::dontSendNotification); }
 
-    void rebuildTrackListUI()
-    {
-        if (trackListContent) trackListContent->updateTracks (tracks);
-        resized(); repaint();
-    }
 
     // ==========================================================
-    //  TrackListContent — one clickable row per track
+    //  ChannelStrip
+    //
+    //  Horizontal row: one column per Syntakt channel.
+    //  Each column contains:
+    //    • a round arm LED button (clickable)
+    //    • the track name drawn vertically below it
+    //
+    //  Column width = component width / numChannels.
+    //  The track name is drawn rotated -90° so it reads
+    //  bottom-to-top, fitting neatly in the label area.
     // ==========================================================
-    class TrackListContent : public juce::Component
+    class ChannelStrip : public juce::Component
     {
     public:
         using ArmCb = std::function<void(int)>;
 
-        TrackListContent (std::vector<SyntaktAudioTrack>& tr, ArmCb cb)
+        ChannelStrip (std::vector<SyntaktAudioTrack>& tr, ArmCb cb)
             : tracks (tr), onArmToggled (std::move (cb))
         { setInterceptsMouseClicks (true, false); }
 
-        void updateTracks (const std::vector<SyntaktAudioTrack>&) { repaint(); }
-        int  getPreferredHeight() const noexcept
-        { return ((int) tracks.size() > 0 ? (int) tracks.size() : 1) * kRowH; }
-
         void mouseDown (const juce::MouseEvent& e) override
         {
-            const int r = e.y / kRowH;
-            if (r >= 0 && r < (int) tracks.size() && onArmToggled)
-                onArmToggled (r);
+            if (tracks.empty()) return;
+            const float colW = (float) getWidth() / (float) tracks.size();
+            const int col = (int) ((float) e.x / colW);
+            if (col >= 0 && col < (int) tracks.size() && onArmToggled)
+                onArmToggled (col);
         }
 
         void paint (juce::Graphics& g) override
         {
             const int n = (int) tracks.size();
+            if (n == 0)
+            {
+                g.setColour (SetupUI::labelsColor.withAlpha (0.3f));
+                g.drawText ("Device not connected — plug in Syntakt (Overbridge mode)",
+                            0, 0, getWidth(), getHeight(),
+                            juce::Justification::centred, false);
+                return;
+            }
+
+            const float colW    = (float) getWidth() / (float) n;
+            const float btnDiam = juce::jmin (colW - 8.0f, (float) kBtnMaxDiam);
+            const float btnY    = (float) kBtnTopPad;
+
             for (int i = 0; i < n; ++i)
             {
-                const auto& t = tracks[(size_t) i];
-                const juce::Rectangle<int> row (0, i * kRowH, getWidth(), kRowH - 1);
+                const auto& t  = tracks[(size_t) i];
+                const float cx = colW * (float) i + colW * 0.5f;
 
-                g.setColour (t.isMainMix ? juce::Colour (0xff1c2a35) : juce::Colour (0xff1c1e21));
-                g.fillRect (row);
+                // ── Column background (subtle tint for main mix) ──
+                if (t.isMainMix)
+                {
+                    g.setColour (juce::Colour (0xff1a2530).withAlpha (0.5f));
+                    g.fillRect (juce::Rectangle<float> (
+                        colW * (float) i, 0.0f, colW, (float) getHeight()));
+                }
 
+                // ── Arm LED button ────────────────────────────────
                 const juce::Rectangle<float> led (
-                    5.0f, row.getY() + (kRowH - kLed) * 0.5f, (float) kLed, (float) kLed);
+                    cx - btnDiam * 0.5f, btnY, btnDiam, btnDiam);
 
                 if (t.isArmed)
                 {
-                    g.setColour (juce::Colour (0xffcc0000).withAlpha (0.35f));
-                    g.fillEllipse (led.expanded (3.0f));
+                    // Outer glow
+                    g.setColour (juce::Colour (0xffcc0000).withAlpha (0.28f));
+                    g.fillEllipse (led.expanded (4.0f));
+                    // Bright fill
                     g.setColour (juce::Colour (0xffff2211));
                     g.fillEllipse (led);
+                    // Inner highlight
+                    g.setColour (juce::Colours::white.withAlpha (0.25f));
+                    g.fillEllipse (led.reduced (btnDiam * 0.15f)
+                                       .withY (led.getY() + btnDiam * 0.08f)
+                                       .withHeight (btnDiam * 0.4f));
                 }
                 else
                 {
-                    g.setColour (juce::Colour (0xff2e2e2e));
+                    // Subtle radial gradient effect via layered fills
+                    g.setColour (juce::Colour (0xff2a2a2a));
                     g.fillEllipse (led);
+                    g.setColour (juce::Colour (0xff383838));
+                    g.fillEllipse (led.reduced (btnDiam * 0.15f));
                 }
-                g.setColour (juce::Colours::black.withAlpha (0.55f));
+
+                // LED border
+                g.setColour (t.isArmed
+                             ? juce::Colour (0xffff4433).withAlpha (0.6f)
+                             : juce::Colours::black.withAlpha (0.5f));
                 g.drawEllipse (led.reduced (0.5f), 1.0f);
 
-                g.setColour (juce::Colour (0xff4a4a4a));
-                g.setFont (9.5f);
+                // Channel number (tiny, above the button)
+                g.setColour (juce::Colour (0xff555555));
                 g.drawText (juce::String (t.deviceChannelIndex + 1),
-                            22, row.getY(), 22, kRowH, juce::Justification::centred, false);
+                            (int) (cx - colW * 0.5f), 0,
+                            (int) colW, kBtnTopPad - 1,
+                            juce::Justification::centred, false);
 
-                g.setColour (t.isArmed    ? juce::Colours::white.withAlpha (0.95f)
-                             : t.isMainMix ? juce::Colour (0xff7ab8e8)
-                                           : SetupUI::labelsColor);
-                g.setFont (12.0f);
-                g.drawText (t.displayName, 48, row.getY(), getWidth() - 54, kRowH,
-                            juce::Justification::centredLeft, true);
+                // ── Vertical track label ──────────────────────────
+                // Draw text rotated -90° (reads bottom to top).
+                // We save/restore the Graphics transform around this.
+                const float labelTop  = btnY + btnDiam + (float) kLabelGap;
+                const float labelH    = (float) getHeight() - labelTop - 2.0f;
+                const float labelW    = colW - 2.0f;
 
-                g.setColour (juce::Colours::black.withAlpha (0.35f));
-                g.drawHorizontalLine (row.getBottom(), 0.0f, (float) getWidth());
-            }
+                const juce::Colour textCol =
+                    t.isArmed    ? juce::Colours::white.withAlpha (0.95f)
+                  : t.isMainMix  ? juce::Colour (0xff7ab8e8)
+                                 : SetupUI::labelsColor;
 
-            if (tracks.empty())
-            {
-                g.setColour (SetupUI::labelsColor.withAlpha (0.4f));
-                g.setFont (12.0f);
-                g.drawText ("Device not ready — press Refresh",
-                            0, 0, getWidth(), getHeight(),
-                            juce::Justification::centred, true);
+                g.setColour (textCol);
+
+                // Apply rotation: pivot = centre of the label area
+                const float pivotX = cx;
+                const float pivotY = labelTop + labelH * 0.5f;
+
+                juce::Graphics::ScopedSaveState ss (g);
+                g.addTransform (juce::AffineTransform::rotation (
+                    -juce::MathConstants<float>::halfPi, pivotX, pivotY));
+
+                // After rotation the bounding rectangle maps to:
+                //   width  becomes labelH (the rotated height)
+                //   height becomes labelW (the rotated width)
+                g.drawText (t.displayName,
+                            (int) (pivotX - labelH * 0.5f),
+                            (int) (pivotY - labelW * 0.5f),
+                            (int) labelH,
+                            (int) labelW,
+                            juce::Justification::centredLeft,
+                            true);
+
+                // ── Column divider ────────────────────────────────
+                if (i > 0)
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.05f));
+                    g.drawVerticalLine ((int) (colW * (float) i),
+                                        2.0f, (float) getHeight() - 2.0f);
+                }
             }
         }
-
-        void resized() override {}
 
     private:
         std::vector<SyntaktAudioTrack>& tracks;
         ArmCb onArmToggled;
-        static constexpr int kRowH = 28;
-        static constexpr int kLed  = 12;
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrackListContent)
+
+        // Geometry
+        static constexpr int kBtnMaxDiam = 26;  // LED diameter cap (px)
+        static constexpr int kBtnTopPad  = 14;  // space above button (for ch number)
+        static constexpr int kLabelGap   = 5;   // gap between button bottom and label
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelStrip)
     };
+
 
     // ── Members ───────────────────────────────────────────────
     OverbridgeEngine& engine;
@@ -749,14 +792,13 @@ private:
 
     std::vector<SyntaktAudioTrack> tracks;
 
-    juce::Label      titleLabel, statusLabel;
-    juce::Label      outputDirSectionLabel, outputDirPathLabel;
-    juce::TextButton browseButton, refreshButton, recordButton;
+    juce::Label      statusLabel;
+    juce::Label      outputDirPathLabel;
+    juce::TextButton browseButton, recordButton;
 
-    juce::Viewport                    trackViewport;
-    std::unique_ptr<TrackListContent> trackListContent;
+    std::unique_ptr<ChannelStrip> channelStrip;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioRecorderComponent)
 };
 
-#endif // JUCE_LINUX && JucePlugin_Build_Standalone
+#endif // JUCE_LINUX && JucePlugin_Build_Standalone && MODZTAKT_OVERBRIDGE

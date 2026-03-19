@@ -479,47 +479,9 @@ public:
             processor.getMidiCollector().addMessageToQueue (msg);
         });
      
-        // ── REC toggle button ─────────────────────────────────────
-        addAndMakeVisible (audioRecorderToggle);
-        audioRecorderToggle.setButtonText ("REC");
-        audioRecorderToggle.setTooltip ("Open Syntakt Overbridge track recorder");
-        audioRecorderToggle.setClickingTogglesState (true);
-        audioRecorderToggle.setColour (juce::TextButton::buttonColourId,
-                                       juce::Colours::transparentBlack);
-        audioRecorderToggle.setColour (juce::TextButton::textColourOffId,
-                                       juce::Colours::lightgrey);
-        audioRecorderToggle.setColour (juce::TextButton::buttonOnColourId,
-                                       juce::Colour (0xff8b0000).withAlpha (0.85f));
-        audioRecorderToggle.setColour (juce::TextButton::textColourOnId,
-                                       juce::Colours::white);
-     
-        audioRecorderToggle.onClick = [this]()
-        {
-            if (audioRecorderToggle.getToggleState())
-            {
-                // OverbridgeEngine is passed directly — no StandalonePluginHolder.
-                audioRecorderPanel =
-                    std::make_unique<AudioRecorderComponent> (obEngine);
-     
-                addAndMakeVisible (audioRecorderPanel.get());
-     
-                constexpr int panelW = 300;
-                constexpr int panelH = 600;
-                const int anchorX = getWidth()  - panelW - 10;
-                const int anchorY = getHeight() - panelH - (10 + 24 + 4 + 24 + 4);
-     
-                audioRecorderPanel->setBounds (anchorX, anchorY, panelW, panelH);
-                audioRecorderPanel->toFront (false);
-            }
-            else
-            {
-                if (audioRecorderPanel)
-                {
-                    removeChildComponent (audioRecorderPanel.get());
-                    audioRecorderPanel.reset();
-                }
-            }
-        };
+        // ── REC ─────────────────────────────────────
+            audioRecorderComponent = std::make_unique<AudioRecorderComponent>(obEngine);
+            addAndMakeVisible(*audioRecorderComponent);
      
         #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
 
@@ -640,12 +602,31 @@ public:
 
         auto area = getLocalBounds().reduced(12);
 
-        // Horizontal split
-        auto lfoColumn = area.removeFromLeft(lfoWidth);
+        // ── Reserve recorder strip at the bottom FIRST ────────
+        // This constrains the three group columns to the upper
+        // portion of the window so they never overlap the recorder.
+        #if JUCE_LINUX \
+            && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        constexpr int kRecGap = 8;
+        auto recorderArea = area.removeFromBottom (AudioRecorderComponent::kPanelHeight);
+        area.removeFromBottom (kRecGap);
+        #endif
+
+        // Horizontal split — columns now only span the remaining (upper) height
+        auto lfoColumn   = area.removeFromLeft(lfoWidth);
         area.removeFromLeft(columnSpacing);
-        auto egColumn  = area.removeFromLeft(egWidth);
+        auto egColumn    = area.removeFromLeft(egWidth);
         area.removeFromLeft(columnSpacing);
         auto delayColumn = area.removeFromLeft(delayWidth);
+
+        // Align recorder right edge with delay column right edge,
+        // leaving the strip to the right free for the settings button.
+        #if JUCE_LINUX \
+            && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        recorderArea.setWidth (delayColumn.getRight() - recorderArea.getX());
+        #endif
 
         // LFO block (fixed-width column)
         auto lfoArea = lfoColumn;
@@ -916,7 +897,7 @@ public:
         );
         #endif
 
-        // audio recorder and setting buttons
+        // setting buttons
         constexpr int size   = 24;
         constexpr int margin = 10;
         auto bounds = getLocalBounds();
@@ -928,12 +909,7 @@ public:
         settingsButton.setBounds (btnColumn.removeFromBottom (size));
         btnColumn.removeFromBottom (4);
      
-        #if JUCE_LINUX \
-                && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
-                && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
-            audioRecorderToggle.setBounds (btnColumn.removeFromBottom (size));
-        #endif
- 
+
         settingsButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::darkgrey.withAlpha(0.3f));
         settingsButton.setClickingTogglesState(false);
 
@@ -942,6 +918,17 @@ public:
 
         // Delay generator frame
         delayEditor.setBounds (delayColumn);
+
+        //************OVERBRIDGE AUDIO **************************************************//
+        #if JUCE_LINUX \
+                && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+                && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+     
+        if (audioRecorderComponent)
+            audioRecorderComponent->setBounds (recorderArea);
+     
+        #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
+
     }
 
     // Oscilloscope pop-up view (not modal)
@@ -1066,8 +1053,7 @@ private:
     // Wire MIDI in the constructor (see step 3).
     OverbridgeEngine obEngine;
  
-    juce::TextButton audioRecorderToggle;
-    std::unique_ptr<AudioRecorderComponent> audioRecorderPanel;
+    std::unique_ptr<AudioRecorderComponent> audioRecorderComponent;
  
     #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
 
@@ -1372,7 +1358,6 @@ private:
             }
         }
 
-        return false;
         return false;
     }
 
