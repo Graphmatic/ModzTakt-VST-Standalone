@@ -1,5 +1,11 @@
 # Automatically generated makefile, created by the Projucer
 # Don't edit this file! Your changes will be overwritten when you re-save the Projucer project!
+#
+# ── OVERBRIDGE BUILD (Standalone with Syntakt audio recording) ────────────────
+# Requires: sudo apt install libusb-1.0-0-dev
+# Also requires the udev rule for device access — see OverbridgeEngine.h.
+# MODZTAKT_OVERBRIDGE=1 and -lusb-1.0 are applied to the Standalone target only.
+# The VST3 target builds without any libusb dependency.
 
 # build with "V=1" for verbose builds
 ifeq ($(V), 1)
@@ -51,7 +57,8 @@ ifeq ($(CONFIG),Debug)
   JUCE_VST3DESTDIR := $(HOME)/.vst3
   JUCE_COPYCMD_VST3 := $(JUCE_OUTDIR)/$(JUCE_VST3DIR) $(JUCE_VST3DESTDIR)
 
-  JUCE_CPPFLAGS_STANDALONE_PLUGIN := 
+  JUCE_CPPFLAGS_STANDALONE_PLUGIN := -DMODZTAKT_OVERBRIDGE=1 -I/usr/include/libusb-1.0
+  JUCE_LDFLAGS_STANDALONE_PLUGIN := -lusb-1.0
   JUCE_TARGET_STANDALONE_PLUGIN := modztakt_dev
 
   JUCE_CPPFLAGS_SHARED_CODE :=  "-DJUCE_SHARED_CODE=1"
@@ -62,7 +69,7 @@ ifeq ($(CONFIG),Debug)
   JUCE_TARGET_VST3_MANIFEST_HELPER := juce_vst3_helper
 
   JUCE_CFLAGS += $(JUCE_CPPFLAGS) $(TARGET_ARCH) -fPIC -g -ggdb -O0 $(CFLAGS)
-  JUCE_CXXFLAGS += $(JUCE_CFLAGS) -std=gnu++17 $(CXXFLAGS)
+  JUCE_CXXFLAGS += $(JUCE_CFLAGS) -std=c++17 $(CXXFLAGS)
   JUCE_LDFLAGS += $(TARGET_ARCH) -L$(JUCE_BINDIR) -L$(JUCE_LIBDIR) $(shell $(PKG_CONFIG) --libs alsa freetype2 fontconfig libcurl) -fvisibility=hidden -lrt -ldl -lpthread $(LDFLAGS)
 
   CLEANCMD = rm -rf $(JUCE_OUTDIR)/$(JUCE_TARGET_VST3) $(JUCE_OUTDIR)/$(JUCE_TARGET_STANDALONE_PLUGIN) $(JUCE_OUTDIR)/$(JUCE_TARGET_SHARED_CODE) $(JUCE_OUTDIR)/$(JUCE_TARGET_VST3_MANIFEST_HELPER) $(JUCE_OBJDIR) pre_build
@@ -90,7 +97,8 @@ ifeq ($(CONFIG),Release)
   JUCE_VST3DESTDIR := $(HOME)/.vst3
   JUCE_COPYCMD_VST3 := $(JUCE_OUTDIR)/$(JUCE_VST3DIR) $(JUCE_VST3DESTDIR)
 
-  JUCE_CPPFLAGS_STANDALONE_PLUGIN := 
+  JUCE_CPPFLAGS_STANDALONE_PLUGIN := -DMODZTAKT_OVERBRIDGE=1 -I/usr/include/libusb-1.0
+  JUCE_LDFLAGS_STANDALONE_PLUGIN := -lusb-1.0
   JUCE_TARGET_STANDALONE_PLUGIN := ModzTakt
 
   JUCE_CPPFLAGS_SHARED_CODE :=  "-DJUCE_SHARED_CODE=1"
@@ -101,7 +109,7 @@ ifeq ($(CONFIG),Release)
   JUCE_TARGET_VST3_MANIFEST_HELPER := juce_vst3_helper
 
   JUCE_CFLAGS += $(JUCE_CPPFLAGS) $(TARGET_ARCH) -fPIC -O3 -flto $(CFLAGS)
-  JUCE_CXXFLAGS += $(JUCE_CFLAGS) -std=gnu++17 $(CXXFLAGS)
+  JUCE_CXXFLAGS += $(JUCE_CFLAGS) -std=c++17 $(CXXFLAGS)
   JUCE_LDFLAGS += $(TARGET_ARCH) -L$(JUCE_BINDIR) -L$(JUCE_LIBDIR) $(shell $(PKG_CONFIG) --libs alsa freetype2 fontconfig libcurl) -fvisibility=hidden -flto -lrt -ldl -lpthread $(LDFLAGS)
 
   CLEANCMD = rm -rf $(JUCE_OUTDIR)/$(JUCE_TARGET_VST3) $(JUCE_OUTDIR)/$(JUCE_TARGET_STANDALONE_PLUGIN) $(JUCE_OUTDIR)/$(JUCE_TARGET_SHARED_CODE) $(JUCE_OUTDIR)/$(JUCE_TARGET_VST3_MANIFEST_HELPER) $(JUCE_OBJDIR) pre_build
