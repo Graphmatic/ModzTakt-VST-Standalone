@@ -1,7 +1,16 @@
 A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or other synth if you edit MIDI CC/NRPN mapping)
+Linux standalone is also available with OverBridge mode per track Audio recording.
 
-<img width="1418" height="725" alt="Screenshot from 2026-03-09 19-28-40" src="https://github.com/user-attachments/assets/002da763-a54e-46cf-ba4e-be9e12cadd4f" />
+<img width="1434" height="934" alt="Screenshot from 2026-03-19 19-05-01" src="https://github.com/user-attachments/assets/ec830ef4-8be7-4618-a4d8-14b3660e9375" />
 
+If you want to use/compile the Linux Standalone version with OB audio recording, install "libusb-1.0" from terminal first and ensure that user have permission on real time audio:
+Create or edit /etc/udev/rules.d/99-elektron-overbridge.rules:
+SUBSYSTEM=="usb", ATTR{idVendor}=="1935", MODE="0664", GROUP="audio"
+Then:
+sudo udevadm control --reload && sudo udevadm trigger
+sudo usermod -aG audio $USER   (re-login after)
+
+to compile the linux standalone version with OB audio, use the separate Makefile available in Builds/MakefileOverbridge folder.
 
 - one LFO with routing to up to 3 MIDI channels (so up to 3 Syntakt tracks can share the same LFO, with independent CC destination for each track).
 -- LFO can be synced to MIDI clock
