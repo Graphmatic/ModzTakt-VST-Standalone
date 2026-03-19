@@ -460,24 +460,7 @@ public:
 
         #if JUCE_LINUX \
             && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
-            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE     
-        // ── Wire MIDI from OverbridgeEngine → PluginProcessor ────
-        //
-        // When the Syntakt is in Overbridge mode, snd-usb-midi is NOT
-        // loaded — JUCE MidiInput goes silent.  MIDI arrives instead
-        // embedded inside the Overbridge USB stream.  The engine
-        // demultiplexes it and fires this callback on its USB thread.
-        //
-        // Replace 'processorRef' with however your MainComponent
-        // reaches the PluginProcessor (e.g. via AudioPluginInstance*,
-        // StandalonePluginHolder::getInstance()->getProcessor(), etc.)
-        //
-        obEngine.setMidiCallback ([this] (const juce::MidiMessage& msg)
-        {
-            // MidiMessageCollector is thread-safe for addMessageToQueue().
-            // Do NOT call any JUCE Component methods here — wrong thread.
-            processor.getMidiCollector().addMessageToQueue (msg);
-        });
+            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
      
         // ── REC ─────────────────────────────────────
             audioRecorderComponent = std::make_unique<AudioRecorderComponent>(obEngine);
