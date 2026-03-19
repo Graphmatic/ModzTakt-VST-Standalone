@@ -70,7 +70,7 @@
                JUCE_VST3_CAN_REPLACE_VST2="0"/>
   <EXPORTFORMATS>
     <LINUX_MAKE targetFolder="Builds/LinuxMakefile" enableGNUExtensions="1" smallIcon="UWx9OR"
-                bigIcon="UWx9OR" extraLinkerFlags="$(shell pkg-config --libs libusb-1.0)">
+                bigIcon="UWx9OR">
       <CONFIGURATIONS>
         <CONFIGURATION isDebug="1" name="Debug" targetName="modztakt_dev"/>
         <CONFIGURATION isDebug="0" name="Release" targetName="ModzTakt" linkTimeOptimisation="1"/>
@@ -111,5 +111,27 @@
         <MODULEPATH id="juce_gui_extra" path="../../juce"/>
       </MODULEPATHS>
     </VS2026>
+    <LINUX_MAKE targetFolder="Builds/MakefileOverbridge" extraDefs="MODZTAKT_OVERBRIDGE=1"
+                extraLinkerFlags="$(shell pkg-config --libs libusb-1.0)">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="ModzTakt_ob"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="ModzTakt_ob"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="~/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="~/JUCE/modules"/>
+      </MODULEPATHS>
+    </LINUX_MAKE>
   </EXPORTFORMATS>
 </JUCERPROJECT>

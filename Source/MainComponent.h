@@ -458,8 +458,9 @@ public:
         //apvts
         scopeButtonAttach = std::make_unique<ButtonAttachment>(apvts, "scope", scopeButton);
 
-        #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
-     
+        #if JUCE_LINUX \
+            && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE     
         // ── Wire MIDI from OverbridgeEngine → PluginProcessor ────
         //
         // When the Syntakt is in Overbridge mode, snd-usb-midi is NOT
@@ -927,7 +928,9 @@ public:
         settingsButton.setBounds (btnColumn.removeFromBottom (size));
         btnColumn.removeFromBottom (4);
      
-        #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+        #if JUCE_LINUX \
+                && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+                && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
             audioRecorderToggle.setBounds (btnColumn.removeFromBottom (size));
         #endif
  
@@ -1055,7 +1058,9 @@ private:
     std::atomic<bool> pendingSyncModeChange { false };
 
     //************OVERBRIDGE AUDIO **************************************************//
-    #if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+    #if JUCE_LINUX \
+            && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
  
     // Owned by MainComponent.  Outlives AudioRecorderComponent.
     // Wire MIDI in the constructor (see step 3).

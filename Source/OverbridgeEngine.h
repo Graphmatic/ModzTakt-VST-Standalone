@@ -87,8 +87,10 @@
 //        sudo usermod -aG audio $USER   (re-login after)
 // ============================================================
 
-#if JUCE_LINUX && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
-
+#if JUCE_LINUX \
+    && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+    && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+    
 #include <JuceHeader.h>
 #include <libusb-1.0/libusb.h>
 
