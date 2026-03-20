@@ -411,7 +411,7 @@ private:
     // ── Geometry constants ────────────────────────────────────
     static constexpr int kControlBarH = 36;
     static constexpr int kTitleX      = 14;   // left margin for title text
-    static constexpr int kTitleW      = 130;  // width reserved for title
+    static constexpr int kTitleW      = 220;  // width reserved for title
 
     static constexpr const char* kIdleText   = "RECORD";
     static constexpr const char* kActiveText = "STOP";
