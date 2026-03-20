@@ -1,7 +1,7 @@
 A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or other synth if you edit MIDI CC/NRPN mapping)
 Linux standalone is also available with OverBridge mode per track Audio recording.
 
-<img width="1434" height="934" alt="Screenshot from 2026-03-19 19-05-01" src="https://github.com/user-attachments/assets/ec830ef4-8be7-4618-a4d8-14b3660e9375" />
+<img width="1432" height="963" alt="Screenshot from 2026-03-20 17-58-30" src="https://github.com/user-attachments/assets/3c965250-e7e3-48f5-9fe1-d30b5be890ea" />
 
 If you want to use/compile the Linux Standalone version with OB audio recording, install "libusb-1.0" from terminal first and ensure that user have permission on real time audio:
 Create or edit /etc/udev/rules.d/99-elektron-overbridge.rules:
@@ -21,6 +21,7 @@ to compile the linux standalone version with OB audio, use the separate Makefile
 - one AHDSR Envelop Generator with linear/exponential/log curves with routing to up to 3 MIDI channels or CCs
 -- "Long" mode for Attack and Release (for pads and texture)
 -- EG can also modulate LFO depth or/and rate and shape notes from Delay
+-- For Linux standalone version with OB, EG can be driven from an Audio Envelope Follower using OB tracks 1-12. 
 
 
 - a MIDI notes delay with routing to up to 3 MIDI channels.
