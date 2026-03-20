@@ -26,6 +26,10 @@ namespace modztakt::eg
 
         CurveShape decayCurveMode   = CurveShape::Exponential;
         CurveShape releaseCurveMode = CurveShape::Exponential;
+
+        // Envelope Follower mode (Linux Overbridge standalone only).
+        // When true, ADHRS is bypassed — audio amplitude drives the EG directly.
+        bool followerActive = false;
     };
 
     struct State
@@ -116,7 +120,7 @@ namespace modztakt::eg
         // Called by processor when a note-on is received (already channel-filtered by processor)
         void noteOn(float vel)
         {
-            if (!params.enabled)
+            if (!params.enabled || params.followerActive)
                 return;
 
             state.velocity = juce::jlimit(0.0, 1.0, (double)vel);
@@ -130,7 +134,7 @@ namespace modztakt::eg
 
         void noteOff()
         {
-            if (!params.enabled)
+            if (!params.enabled || params.followerActive)
                 return;
 
             state.stage = State::Stage::Release;
@@ -140,14 +144,28 @@ namespace modztakt::eg
         }
 
         // Advance engine by one audio block. Returns true if outValue01 is valid.
-        bool processBlock(int numSamples, double& outValue01)
+        //
+        // followerLevel01 (optional, [0,1]):
+        //   When >= 0 AND params.followerActive is true, the ADHRS state machine
+        //   is bypassed and outValue01 is set directly from the audio amplitude.
+        //   Pass the default -1.0f for normal ADHRS operation.
+        bool processBlock(int numSamples, double& outValue01, float followerLevel01 = -1.0f)
         {
             if (!params.enabled)
                 return false;
 
-            // Deterministic time advance
+            // Deterministic time advance (always, keeps nowMs consistent)
             state.nowMs += (double) numSamples * msPerSample;
 
+            // ── Envelope Follower bypass ──────────────────────────
+            if (params.followerActive && followerLevel01 >= 0.0f)
+            {
+                state.currentValue = (double) followerLevel01;
+                outValue01         = (double) followerLevel01;
+                return true;
+            }
+
+            // ── Normal ADHRS processing ───────────────────────────
             if (!advanceEnvelope(state))
                 return false;
 

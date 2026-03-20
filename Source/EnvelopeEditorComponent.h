@@ -4,6 +4,13 @@
 #include "Cosmetic.h"
 #include "SyntaktParameterTable.h"
 
+// EnvelopeFollower combobox is only compiled in OB standalone builds.
+#if JUCE_LINUX \
+    && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+    && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+#include "EnvelopeFollowerEngine.h"
+#endif
+
 class EnvelopeEditorComponent : public juce::Component, private juce::Timer
 {
 public:
@@ -254,6 +261,63 @@ public:
         egToLfoRateLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
         addAndMakeVisible(egToLfoRateLabel);
 
+        // ── Envelope Follower source selector (Linux Overbridge only) ──
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+            followerSourceLabel.setText ("Follower Src", juce::dontSendNotification);
+            followerSourceLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+            addAndMakeVisible (followerSourceLabel);
+
+            // Item 1 (index 0) = Off;  items 2..13 (index 1..12) = Audio Track 1..12
+            followerSourceBox.addItem ("Off (ADHRS)", 1);
+            for (int t = 1; t <= EnvelopeFollowerEngine::kNumAudioTracks; ++t)
+                followerSourceBox.addItem ("Audio Track " + juce::String (t), t + 1);
+
+            addAndMakeVisible (followerSourceBox);
+            followerSourceAttach = std::make_unique<ChoiceAttachment> (
+                apvts, "egFollowerSource", followerSourceBox);
+
+            followerThresholdLabel.setText ("Threshold", juce::dontSendNotification);
+            followerThresholdLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+            addAndMakeVisible (followerThresholdLabel);
+
+            followerThresholdSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+            followerThresholdSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 20);
+            followerThresholdSlider.setLookAndFeel (&lookBlue);
+            followerThresholdSlider.setNumDecimalPlacesToDisplay (2);
+            followerThresholdSlider.setRange (0.0, 1.0, 0.001);
+            followerThresholdSlider.textFromValueFunction = [](double v) -> juce::String
+            {
+                return juce::String (v * 100.0, 1) + " %";
+            };
+            followerThresholdSlider.updateText();
+            addAndMakeVisible (followerThresholdSlider);
+
+            followerThresholdAttach = std::make_unique<SliderAttachment> (
+                apvts, "egFollowerThreshold", followerThresholdSlider);
+
+            followerSensitivityLabel.setText ("Sensitivity", juce::dontSendNotification);
+            followerSensitivityLabel.setColour (juce::Label::textColourId, SetupUI::labelsColor);
+            addAndMakeVisible (followerSensitivityLabel);
+
+            followerSensitivitySlider.setSliderStyle (juce::Slider::LinearHorizontal);
+            followerSensitivitySlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 20);
+            followerSensitivitySlider.setLookAndFeel (&lookOrange);
+            followerSensitivitySlider.setNumDecimalPlacesToDisplay (1);
+            followerSensitivitySlider.textFromValueFunction = [](double v) -> juce::String
+            {
+                return juce::String (v, 1) + "x";
+            };
+            followerSensitivitySlider.updateText();
+            addAndMakeVisible (followerSensitivitySlider);
+
+            followerSensitivityAttach = std::make_unique<SliderAttachment> (
+                apvts, "egFollowerSensitivity", followerSensitivitySlider);
+
+        #endif  // JUCE_LINUX && JucePlugin_Build_Standalone && MODZTAKT_OVERBRIDGE
+
         // Keep LED states in sync with automation/preset changes
         startTimerHz(20);
         
@@ -274,6 +338,18 @@ public:
         {
             egRouteChannelAttach[r].reset();
         }
+
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+            followerSensitivityAttach.reset();
+            followerSensitivitySlider.setLookAndFeel (nullptr);
+            followerThresholdAttach.reset();
+            followerThresholdSlider.setLookAndFeel (nullptr);
+            followerSourceAttach.reset();
+
+        #endif
     }
 
     void resized() override
@@ -300,7 +376,7 @@ public:
         };
 
         // EG ON/OFF
-        auto egEnableRow = content.removeFromTop(rowHeight + 4);
+        auto egEnableRow = content.removeFromTop(rowHeight);
 
         juce::FlexBox egEnableFlex;
         egEnableFlex.flexDirection = juce::FlexBox::Direction::row;
@@ -318,12 +394,26 @@ public:
         
         egEnableFlex.performLayout(egEnableRow);
 
-        content.removeFromTop(20);
+        content.removeFromTop(14);
+
+        // ── Follower source + threshold + sensitivity rows ─────
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+            placeRow (followerSourceLabel,      followerSourceBox);
+            content.removeFromTop (4);
+            placeRow (followerThresholdLabel,   followerThresholdSlider);
+            content.removeFromTop (4);
+            placeRow (followerSensitivityLabel, followerSensitivitySlider);
+            content.removeFromTop (4);
+    
+        #endif
 
         // ---- routing rows ----
         placeRow(noteSourceEgChannelLabel, noteSourceEgChannelBox);
 
-        content.removeFromTop(20);
+        content.removeFromTop(16);
 
         // ---- ADSR ----
         placeRow(attackLabel, attackSlider);
@@ -362,11 +452,11 @@ public:
 
         attackOptions.performLayout(attackOptionsRow);
 
-        content.removeFromTop(20);
+        content.removeFromTop(18);
 
         placeRow(holdLabel, holdSlider);
 
-        content.removeFromTop(20);
+        content.removeFromTop(18);
 
         placeRow(decayLabel, decaySlider);
 
@@ -404,11 +494,11 @@ public:
 
         decayCurveBox.performLayout(decayCurveRow);
 
-        content.removeFromTop(20);
+        content.removeFromTop(18);
 
         placeRow(sustainLabel, sustainSlider);
 
-        content.removeFromTop(20);
+        content.removeFromTop(18);
 
         placeRow(releaseLabel, releaseSlider);
 
@@ -454,11 +544,11 @@ public:
 
         releaseCurveBox.performLayout(releaseCurveRow);
 
-        content.removeFromTop(24);
+        content.removeFromTop(20);
 
         placeRow(velocityAmountLabel, velocityAmountSlider);
 
-        content.removeFromTop(20);
+        //content.removeFromTop(14);
 
         // EG to LFO
         auto egToLfoRow = content.removeFromTop(rowHeight + 4);
@@ -487,7 +577,7 @@ public:
 
         egToLfoBox.performLayout(egToLfoRow);
 
-        content.removeFromTop(18);
+        content.removeFromTop(14);
 
         // EG routes
         auto layoutRouteRow = [&](juce::Rectangle<int> row, int r)
@@ -525,7 +615,7 @@ public:
         {
             auto row = routesArea.removeFromTop(rowHeight);
             layoutRouteRow(row, r);
-            routesArea.removeFromTop(8);
+            routesArea.removeFromTop(6);
         }
     }
 
@@ -685,6 +775,81 @@ private:
         releaseLog->setAlpha(a);
 
         releaseLong->setAlpha(a);
+
+        // ── Follower override (Linux Overbridge only) ──────────
+        // When a follower track is selected, grey out all ADHRS controls
+        // and the Note Source channel — the audio amplitude drives the EG
+        // directly and MIDI triggers are ignored.
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        {
+            const bool followerOn =
+                apvts.getRawParameterValue ("egFollowerSource")->load() > 0.5f;
+            const float fa = (enabled && followerOn) ? 0.35f : (enabled ? 1.0f : 0.45f);
+
+            noteSourceEgChannelBox.setEnabled   (enabled && ! followerOn);
+            noteSourceEgChannelLabel.setEnabled (enabled && ! followerOn);
+            noteSourceEgChannelBox.setAlpha     (fa);
+
+            attackSlider.setEnabled         (enabled && ! followerOn);
+            holdSlider.setEnabled           (enabled && ! followerOn);
+            decaySlider.setEnabled          (enabled && ! followerOn);
+            sustainSlider.setEnabled        (enabled && ! followerOn);
+            releaseSlider.setEnabled        (enabled && ! followerOn);
+            velocityAmountSlider.setEnabled (enabled && ! followerOn);
+
+            attackSlider.setAlpha         (fa);
+            holdSlider.setAlpha           (fa);
+            decaySlider.setAlpha          (fa);
+            sustainSlider.setAlpha        (fa);
+            releaseSlider.setAlpha        (fa);
+            velocityAmountSlider.setAlpha (fa);
+
+            attackFast->setEnabled (enabled && ! followerOn);
+            attackLong->setEnabled (enabled && ! followerOn);
+            attackSnap->setEnabled (enabled && ! followerOn);
+            attackFast->setAlpha (fa);
+            attackLong->setAlpha (fa);
+            attackSnap->setAlpha (fa);
+
+            decayLinear->setEnabled  (enabled && ! followerOn);
+            decayExpo->setEnabled    (enabled && ! followerOn);
+            decayLog->setEnabled     (enabled && ! followerOn);
+            decayLinear->setAlpha (fa);
+            decayExpo->setAlpha   (fa);
+            decayLog->setAlpha    (fa);
+
+            releaseLinear->setEnabled (enabled && ! followerOn);
+            releaseExpo->setEnabled   (enabled && ! followerOn);
+            releaseLog->setEnabled    (enabled && ! followerOn);
+            releaseLong->setEnabled   (enabled && ! followerOn);
+            releaseLinear->setAlpha (fa);
+            releaseExpo->setAlpha   (fa);
+            releaseLog->setAlpha    (fa);
+            releaseLong->setAlpha   (fa);
+
+            followerSourceBox.setColour (
+            juce::ComboBox::backgroundColourId,
+            followerOn ? juce::Colour (0xff1a5f78) : juce::Colour (0xff2a2d30));
+
+            // Threshold and sensitivity sliders only useful when a track is selected
+            const bool followerControlsEnabled = enabled && followerOn;
+            const float followerControlsAlpha  = followerControlsEnabled ? 1.0f : 0.35f;
+
+            followerThresholdSlider.setEnabled (followerControlsEnabled);
+            followerThresholdSlider.setAlpha   (followerControlsAlpha);
+            followerThresholdLabel.setEnabled  (followerControlsEnabled);
+            followerThresholdLabel.setAlpha    (followerControlsAlpha);
+
+            followerSensitivitySlider.setEnabled (followerControlsEnabled);
+            followerSensitivitySlider.setAlpha   (followerControlsAlpha);
+            followerSensitivityLabel.setEnabled  (followerControlsEnabled);
+            followerSensitivityLabel.setAlpha    (followerControlsAlpha);
+
+        }
+        #endif
+
     }
 
 
@@ -1233,6 +1398,24 @@ private:
     juce::Label egToLfoDepthLabel, egToLfoRateLabel;
     std::unique_ptr<ButtonAttachment> egToLfoDepthAttach, egToLfoRateAttach;
 
+    // ── Envelope Follower source + threshold (Linux Overbridge only) ──
+    #if JUCE_LINUX \
+        && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+        && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        
+        juce::Label    followerSourceLabel;
+        juce::ComboBox followerSourceBox;
+        std::unique_ptr<ChoiceAttachment> followerSourceAttach;
+
+        juce::Label  followerThresholdLabel;
+        juce::Slider followerThresholdSlider;
+        std::unique_ptr<SliderAttachment> followerThresholdAttach;
+
+        juce::Label  followerSensitivityLabel;
+        juce::Slider followerSensitivitySlider;
+        std::unique_ptr<SliderAttachment> followerSensitivityAttach;
+
+    #endif
 
     // look & feel from your Cosmetic.h
     ModzTaktLookAndFeel lookGreen  { SetupUI::sliderTrackGreen };

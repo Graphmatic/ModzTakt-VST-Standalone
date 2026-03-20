@@ -11,6 +11,12 @@
 #include "LfoEngine.h"
 #include "DelayEngine.h"
 
+#if JUCE_LINUX \
+    && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+    && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+#include "EnvelopeFollowerEngine.h"
+#endif
+
 // Forward declare editor
 class ModzTaktAudioProcessorEditor;
 
@@ -267,7 +273,55 @@ public:
         egParams.decayCurveMode   = (modztakt::eg::CurveShape) (int) apvts.getRawParameterValue("egDecayCurve")->load();
         egParams.releaseCurveMode = (modztakt::eg::CurveShape) (int) apvts.getRawParameterValue("egReleaseCurve")->load();
 
-        egEngine.setParams(egParams);
+        // ── Envelope Follower configuration ───────────────────
+    // Declared outside the #if so all builds can pass it to
+    // egEngine.processBlock(). Stays -1.0f in non-OB builds
+    // → normal ADHRS path is taken inside processBlock().
+    float followerLevelForBlock = -1.0f;
+
+    #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        {
+            const int followerChoice = (int) apvts.getRawParameterValue ("egFollowerSource")->load();
+            egParams.followerActive  = (followerChoice > 0);
+
+            if (egParams.followerActive)
+            {
+                const int   trackIdx    = followerChoice - 1;
+                const float rawLevel    = egFollower.getTrackLevel (trackIdx);
+
+                // 1) Apply sensitivity (gain) — boosts low IIR amplitudes
+                //    so the full CC range is reachable at typical Overbridge
+                //    levels (0.02–0.25).  Clamped to 1.0 before thresholding.
+                const float sensitivity =
+                    apvts.getRawParameterValue ("egFollowerSensitivity")->load();
+                const float scaledLevel =
+                    juce::jlimit (0.0f, 1.0f, rawLevel * sensitivity);
+
+                // 2) Apply threshold — levels below it map to 0 (cuts noise
+                //    floor / bleed).  Levels above are rescaled to 0..1 so
+                //    that threshold..1.0 fills the full CC range.
+                const float threshold =
+                    apvts.getRawParameterValue ("egFollowerThreshold")->load();
+
+                if (scaledLevel <= threshold)
+                {
+                    followerLevelForBlock = 0.0f;
+                }
+                else
+                {
+                    const float above = scaledLevel - threshold;
+                    const float span  = 1.0f - threshold;
+                    followerLevelForBlock = (span > 0.0f)
+                        ? juce::jlimit (0.0f, 1.0f, above / span)
+                        : 0.0f;
+                }
+            }
+        }
+        #endif
+
+        egEngine.setParams (egParams);
 
         // EG routing setup
         struct EgRouteRuntime
@@ -538,7 +592,7 @@ public:
 
         if (egParams.enabled)
         {
-            egHasValue = egEngine.processBlock(audio.getNumSamples(), eg01);
+            egHasValue = egEngine.processBlock(audio.getNumSamples(), eg01, followerLevelForBlock);
             eg01 = juce::jlimit(0.0, 1.0, eg01);
         }
         
@@ -1118,12 +1172,19 @@ public:
 
     static inline int egMidiDestCount() { return SyntaktParameterEgIndex.size(); }
 
-    // for OverBridge
-    public:
-    juce::MidiMessageCollector& getMidiCollector() noexcept
-    {
-        return midiCollector;
-    }
+    // for OverBridge (getMidiCollector not used finally, even in OB mode Syntakt expose a standard MIDI In/Out)
+    // public:
+    // juce::MidiMessageCollector& getMidiCollector() noexcept
+    // {
+    //     return midiCollector;
+    // }
+    #if JUCE_LINUX \
+        && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+        && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+        EnvelopeFollowerEngine& getEnvelopeFollower() noexcept { return egFollower; }
+    
+    #endif
 
     //==============================================================================
     // PRIVATE IMPLEMENTATION
@@ -1195,6 +1256,14 @@ private:
     // EG
     modztakt::eg::Engine egEngine;
     std::atomic<bool> egIsEnabled { false };
+
+    #if JUCE_LINUX \
+        && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+        && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+        EnvelopeFollowerEngine egFollower;
+
+    #endif
 
     bool egWasDrivingLfo = false;  // audio thread only, edge detector for UI
 
@@ -1578,7 +1647,41 @@ private:
             juce::StringArray{"Off (send every change)", "0.5ms", "1.0ms", "1.5ms", "2.0ms", "3.0ms", "5.0ms"},
             0));  // Default to index 0 = Off
 
-    return { p.begin(), p.end() };
+        // ── Envelope Follower source ──────────────────────────
+        {
+            juce::StringArray followerChoices;
+            followerChoices.add ("Off (ADHRS)");
+            for (int t = 1; t <= 12; ++t)
+                followerChoices.add ("Audio Track " + juce::String (t));
+
+            p.push_back (std::make_unique<juce::AudioParameterChoice> (
+                "egFollowerSource",
+                "EG Follower Source",
+                followerChoices,
+                0));  // Default: 0 = Off
+        }
+
+        // ── Envelope Follower threshold ───────────────────────
+        p.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "egFollowerThreshold",
+            "EG Follower Threshold",
+            juce::NormalisableRange<float> (0.0f, 1.0f),
+            0.02f));  // Default 2% — lowered now that sensitivity scales up
+
+        // ── Envelope Follower sensitivity (gain multiplier) ───
+        // Applied to the raw IIR level before thresholding so the
+        // user can fill the full CC range even at moderate amplitudes.
+        // Range 1x–20x.  Default 5x: a kick at ~0.15 IIR amplitude
+        // becomes 0.75 after scaling → ~CC 94 after threshold removal.
+        // Registered unconditionally — same rule as all other params.
+        p.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "egFollowerSensitivity",
+            "EG Follower Sensitivity",
+            juce::NormalisableRange<float> (1.0f, 20.0f, 0.0f, 0.40f),
+            5.0f));
+
+        return { p.begin(), p.end() };
+    
     }
 
     //==============================================================================

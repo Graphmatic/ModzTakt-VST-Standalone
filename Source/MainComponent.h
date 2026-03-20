@@ -459,13 +459,30 @@ public:
         scopeButtonAttach = std::make_unique<ButtonAttachment>(apvts, "scope", scopeButton);
 
         #if JUCE_LINUX \
-            && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
-            && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
-     
-        // ── REC ─────────────────────────────────────
-            audioRecorderComponent = std::make_unique<AudioRecorderComponent>(obEngine);
-            addAndMakeVisible(*audioRecorderComponent);
-     
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+            // ── Envelope Follower audio routing ──────────────────────
+            // Register the auxiliary callback once so the follower engine
+            // always receives Overbridge audio, regardless of recording state.
+            obEngine.setAuxAudioCallback (
+                [this] (const float* const* samples, int numChannels, int numFrames)
+                {
+                    processor.getEnvelopeFollower().pushSamples (samples, numChannels, numFrames);
+                });
+
+            // Start the engine immediately if the device is already connected,
+            // so the follower has audio data as soon as the UI opens.
+            if (obEngine.probe() == OverbridgeEngine::DeviceState::Ready)
+                obEngine.start();
+
+            // Listen for follower source changes to (re-)start the engine on demand.
+            apvts.addParameterListener ("egFollowerSource", this);
+
+            // ── REC ──────────────────────────────────────────────────
+            audioRecorderComponent = std::make_unique<AudioRecorderComponent> (obEngine);
+            addAndMakeVisible (*audioRecorderComponent);
+
         #endif  // JUCE_LINUX && JucePlugin_Build_Standalone
 
         // Settings Button
@@ -568,6 +585,12 @@ public:
         depthSlider.setLookAndFeel (nullptr);
 
         apvts.removeParameterListener ("syncMode", this);
+
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        apvts.removeParameterListener ("egFollowerSource", this);
+        #endif
     }
 
     void paint (juce::Graphics& g) override
@@ -1107,6 +1130,26 @@ private:
                 processor.msFloofThreshold.store(msFloofThreshold, std::memory_order_relaxed);
             }
         }
+
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+        
+            // When user selects a follower track, ensure OverbridgeEngine is running.
+            if (paramID == "egFollowerSource")
+            {
+                juce::MessageManager::callAsync ([this]()
+                {
+                    const bool followerOn = apvts.getRawParameterValue ("egFollowerSource")->load() > 0.5f;
+                    if (followerOn && ! obEngine.isRunning())
+                    {
+                        obEngine.probe();
+                        obEngine.start();
+                    }
+                });
+            }
+                 
+        #endif
     }
 
     void timerCallback() override

@@ -265,8 +265,14 @@ public:
     }
 
     // ── Callback wiring ───────────────────────────────────────
-    void setAudioCallback (AudioCallback cb) { audioCallback = std::move (cb); }
-    void setMidiCallback  (MidiCallback  cb) { midiCallback  = std::move (cb); }
+    void setAudioCallback    (AudioCallback cb) { audioCallback    = std::move (cb); }
+
+    /** Second audio callback — always fires alongside the main one, independent
+        of recording state.  Used by EnvelopeFollowerEngine to track per-track
+        amplitude without interfering with the recording pipeline. */
+    void setAuxAudioCallback (AudioCallback cb) { auxAudioCallback = std::move (cb); }
+
+    void setMidiCallback     (MidiCallback  cb) { midiCallback     = std::move (cb); }
 
     // ── Probe ─────────────────────────────────────────────────
     DeviceState probe()
@@ -986,6 +992,11 @@ private:
 
         if (audioCallback && totalFrames > 0)
             audioCallback (scratchPtrs.data(), kNumChannels, totalFrames);
+
+        // Auxiliary callback — EnvelopeFollowerEngine always receives audio
+        // regardless of whether recording is active.
+        if (auxAudioCallback && totalFrames > 0)
+            auxAudioCallback (scratchPtrs.data(), kNumChannels, totalFrames);
     }
 
     // ── USB helpers ───────────────────────────────────────────
@@ -1057,6 +1068,7 @@ private:
     std::unique_ptr<UsbThread> usbThread;
 
     AudioCallback audioCallback;
+    AudioCallback auxAudioCallback;   // EnvelopeFollowerEngine; always fires when engine runs
     MidiCallback  midiCallback;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OverbridgeEngine)
@@ -1065,4 +1077,4 @@ private:
 inline constexpr uint16_t OverbridgeEngine::kKnownOBPids[];
 inline constexpr uint16_t OverbridgeEngine::kKnownMidiPids[];
 
-#endif // JUCE_LINUX && JucePlugin_Build_Standalone
+#endif // JUCE_LINUX && JucePlugin_Build_Standalone && MODZTAKT_OVERBRIDGE

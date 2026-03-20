@@ -17,7 +17,16 @@ public:
         // Choose a sensible initial size. You can match your standalone window later.
         setSize (700, 540);
         setResizable(false, false);      // width only
-        setResizeLimits(1430, 900, 1920, 900); // minW, minH, maxW, maxH
+        setResizeLimits(1430, 700, 1920, 700); // minW, minH, maxW, maxH
+
+        #if JUCE_LINUX \
+            && defined (JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+            && defined (MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
+
+            setResizeLimits(1430, 930, 1920, 930); // minW, minH, maxW, maxH
+
+        #endif
+
     }
 
     inline ~ModzTaktAudioProcessorEditor() override = default;

@@ -451,6 +451,11 @@ private:
             }
         }
 
+        // Keep USB stream alive whenever device is ready so the
+        // EnvelopeFollowerEngine receives audio continuously.
+        if (ready && ! engine.isRunning())
+            engine.start();
+    
         setStatus (engine.getStatusText());
         if (channelStrip) channelStrip->repaint();
         updateRecordButton();
@@ -548,7 +553,11 @@ private:
 
     void stopRecording()
     {
-        engine.stop();
+        // Do NOT stop the OverbridgeEngine here: EnvelopeFollowerEngine
+        // still needs the USB stream to track audio amplitude.
+        // The engine stops only on device disconnect or app exit.
+        // engine.stop();
+
         engine.setAudioCallback (nullptr);
         writerThread.stopThread (5000);
 
