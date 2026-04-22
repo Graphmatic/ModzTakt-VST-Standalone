@@ -28,6 +28,8 @@
       </GROUP>
       <FILE id="emDMWr" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
     </GROUP>
+    <FILE id="c1jDON" name="AudioRecorderComponent.h" compile="0" resource="0"
+          file="Source/AudioRecorderComponent.h"/>
     <FILE id="adaQwH" name="Cosmetic.h" compile="0" resource="0" file="Source/Cosmetic.h"/>
     <FILE id="zKShmX" name="DelayEditorComponent.h" compile="0" resource="0"
           file="Source/DelayEditorComponent.h"/>
@@ -36,9 +38,13 @@
           file="Source/EnvelopeEditorComponent.h"/>
     <FILE id="SyJmvR" name="EnvelopeEngine.h" compile="0" resource="0"
           file="Source/EnvelopeEngine.h"/>
+    <FILE id="rpaXJG" name="EnvelopeFollowerEngine.h" compile="0" resource="0"
+          file="Source/EnvelopeFollowerEngine.h"/>
     <FILE id="RJ7RAs" name="LfoEngine.h" compile="0" resource="0" file="Source/LfoEngine.h"/>
     <FILE id="dKpP9P" name="MidiInParse.h" compile="0" resource="0" file="Source/MidiInParse.h"/>
     <FILE id="yREiW1" name="MidiInput.h" compile="0" resource="0" file="Source/MidiInput.h"/>
+    <FILE id="wNshet" name="OverbridgeEngine.h" compile="0" resource="0"
+          file="Source/OverbridgeEngine.h"/>
     <FILE id="ikFWi8" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
     <FILE id="kcSpYS" name="PluginEntry.cpp" compile="1" resource="0" file="Source/PluginEntry.cpp"/>
     <FILE id="t8fh26" name="PluginProcessor.h" compile="0" resource="0"
@@ -48,6 +54,8 @@
     <FILE id="hHSPl4" name="SyntaktParameterTable.h" compile="0" resource="0"
           file="Source/SyntaktParameterTable.h"/>
     <FILE id="b7Dlol" name="TODO.md" compile="0" resource="1" file="Source/TODO.md"/>
+    <FILE id="thIAp4" name="VuMeterComponent.h" compile="0" resource="0"
+          file="Source/VuMeterComponent.h"/>
   </MAINGROUP>
   <MODULES>
     <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="1" useGlobalPath="1"/>

@@ -222,24 +222,24 @@ public:
 
             add ( 0, "Main L",            true);
             add ( 1, "Main R",            true);
-            add ( 2, "Audio Track 1",     false);
-            add ( 3, "Audio Track 2",     false);
-            add ( 4, "Audio Track 3",     false);
-            add ( 5, "Audio Track 4",     false);
-            add ( 6, "Audio Track 5",     false);
-            add ( 7, "Audio Track 6",     false);
-            add ( 8, "Audio Track 7",     false);
-            add ( 9, "Audio Track 8",     false);
-            add (10, "Audio Track 9",     false);
-            add (11, "Audio Track 10",    false);
-            add (12, "Audio Track 11",    false);
-            add (13, "Audio Track 12",    false);
+            add ( 2, "Track 1",     false);
+            add ( 3, "Track 2",     false);
+            add ( 4, "Track 3",     false);
+            add ( 5, "Track 4",     false);
+            add ( 6, "Track 5",     false);
+            add ( 7, "Track 6",     false);
+            add ( 8, "Track 7",     false);
+            add ( 9, "Track 8",     false);
+            add (10, "Track 9",     false);
+            add (11, "Track 10",    false);
+            add (12, "Track 11",    false);
+            add (13, "Track 12",    false);
             add (14, "FX Track L",        false);
             add (15, "FX Track R",        false);
-            add (16, "Delay/Reverb L",    false);
-            add (17, "Delay/Reverb R",    false);
-            add (18, "External In L",     false);
-            add (19, "External In R",     false);
+            add (16, "Delay-Rev L",    false);
+            add (17, "Delay-Rev R",    false);
+            add (18, "Ext. In L",     false);
+            add (19, "Ext. In R",     false);
 
             return v;
         }();
@@ -271,6 +271,14 @@ public:
         of recording state.  Used by EnvelopeFollowerEngine to track per-track
         amplitude without interfering with the recording pipeline. */
     void setAuxAudioCallback (AudioCallback cb) { auxAudioCallback = std::move (cb); }
+
+    /** Third audio callback — dedicated to VU-meter level metering.
+        Always fires when the engine is running, independently of both the
+        recording callback (audioCallback) and the envelope-follower callback
+        (auxAudioCallback).  Register once from AudioRecorderComponent and
+        clear to nullptr on its destruction. */
+    void setVuAudioCallback  (AudioCallback cb) { vuAudioCallback  = std::move (cb); }
+    // ─────────────────────────────────────────────────────────
 
     void setMidiCallback     (MidiCallback  cb) { midiCallback     = std::move (cb); }
 
@@ -331,12 +339,12 @@ public:
         else if (state == DeviceState::WrongMode)
         {
             statusText = "Syntakt found in USB-MIDI mode.\n"
-                         "Switch: Settings → System → USB Config → Overbridge";
+                         "Switch: Settings -> System -> USB Config -> Overbridge";
         }
         else if (state == DeviceState::NotConnected)
         {
             statusText = "No Elektron device found.\n"
-                         "Connect Syntakt → USB Config → Overbridge.";
+                         "Connect Syntakt -> USB Config -> Overbridge.";
         }
 
         libusb_free_device_list (devList, 1);
@@ -997,6 +1005,12 @@ private:
         // regardless of whether recording is active.
         if (auxAudioCallback && totalFrames > 0)
             auxAudioCallback (scratchPtrs.data(), kNumChannels, totalFrames);
+
+        // VU-meter callback — fires every decode regardless of recording
+        // or envelope-follower state.  Registered by AudioRecorderComponent.
+        if (vuAudioCallback && totalFrames > 0)
+            vuAudioCallback (scratchPtrs.data(), kNumChannels, totalFrames);
+        // ─────────────────────────────────────────────────────
     }
 
     // ── USB helpers ───────────────────────────────────────────
@@ -1069,6 +1083,7 @@ private:
 
     AudioCallback audioCallback;
     AudioCallback auxAudioCallback;   // EnvelopeFollowerEngine; always fires when engine runs
+    AudioCallback vuAudioCallback;    // VU-meter metering; always fires when engine runs
     MidiCallback  midiCallback;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OverbridgeEngine)

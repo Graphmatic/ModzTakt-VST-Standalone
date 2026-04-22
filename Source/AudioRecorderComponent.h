@@ -14,6 +14,7 @@
 #include <JuceHeader.h>
 #include "Cosmetic.h"
 #include "OverbridgeEngine.h"
+#include "VuMeterComponent.h"
 
 #include <atomic>
 #include <vector>
@@ -254,7 +255,7 @@ private:
 //   │ ⬤ TRACK RECORDER  [status text ...]  [path] [Browse] [REC] │  ← control bar
 //   ├─────────────────────────────────────────────────────────────┤
 //   │  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○ │  ← arm LEDs
-//   │  M  M  1  2  3  4  5  6  7  8  9  10 11 12 FX FX DR DR EX EX│  ← vertical labels
+//   │  M  M  1  2  3  4  5  6  7  8  9  10 11 12 FX FX DR DR EX EX│  ← vertical labels + VU meters
 //   └─────────────────────────────────────────────────────────────┘
 // ============================================================
 class AudioRecorderComponent : public juce::Component,
@@ -312,16 +313,26 @@ public:
 
         // ── Channel strip ─────────────────────────────────────
         channelStrip = std::make_unique<ChannelStrip> (
-            tracks, [this](int i){ onTrackArmToggled (i); });
+            tracks, [this](int i){ onTrackArmToggled (i); }, vuLevels);
         addAndMakeVisible (*channelStrip);
 
+        engine.setVuAudioCallback (
+            [this] (const float* const* samples, int numCh, int numFrames)
+            {
+                vuLevels.pushAudio (samples, numCh, numFrames);
+            });
+
         refreshTracks();
-        startTimerHz (1);
+
+        startTimerHz (30);
     }
 
     ~AudioRecorderComponent() override
     {
         stopTimer();
+
+        engine.setVuAudioCallback (nullptr);
+
         if (writerThread.isThreadRunning())
         {
             engine.stop();
@@ -348,7 +359,7 @@ public:
 
         // Group title — left-aligned in control bar
         g.setColour (juce::Colours::white.withAlpha (0.55f));
-        g.drawText ("OB AUDIO TRACK RECORDER",
+        g.drawText ("OB AUDIO RECORDER",
                     kTitleX, 0, kTitleW, kControlBarH,
                     juce::Justification::centredLeft, false);
 
@@ -416,11 +427,23 @@ private:
     static constexpr const char* kIdleText   = "RECORD";
     static constexpr const char* kActiveText = "STOP";
 
-    // ── Timer: re-probe once per second when idle ─────────────
+    // ── Timer: VU decay + repaint at 20 Hz; device probe at 1 Hz ─
     void timerCallback() override
     {
-        if (! isRecording())
-            refreshTracks();
+        vuLevels.decayAll();
+
+        // Repaint the channel strip every tick for smooth VU animation.
+        if (channelStrip)
+            channelStrip->repaint();
+
+        // Keep the device-scan at its original 1 Hz rate to avoid hammering
+        // libusb_get_device_list() unnecessarily.
+        if (++timerTickCount >= 20)
+        {
+            timerTickCount = 0;
+            if (! isRecording())
+                refreshTracks();
+        }
     }
 
     // ── Device scan ───────────────────────────────────────────
@@ -540,8 +563,8 @@ private:
         }
 
         recordButton.setButtonText (kActiveText);
-        setStatus ("Recording — " + juce::String ((int) armedIndices.size())
-                   + " ch  →  " + outputDirectory.getFullPathName());
+        setStatus ("Recording - " + juce::String ((int) armedIndices.size())
+                   + " ch  ->  " + outputDirectory.getFullPathName());
         repaint();  // refresh recording dot
 
        #if JUCE_DEBUG
@@ -643,6 +666,7 @@ private:
     //  Each column contains:
     //    • a round arm LED button (clickable)
     //    • the track name drawn vertically below it
+    //    • a 7-LED VU meter centred in the label area (BUG FIX)
     //
     //  Column width = component width / numChannels.
     //  The track name is drawn rotated -90° so it reads
@@ -653,8 +677,12 @@ private:
     public:
         using ArmCb = std::function<void(int)>;
 
-        ChannelStrip (std::vector<SyntaktAudioTrack>& tr, ArmCb cb)
-            : tracks (tr), onArmToggled (std::move (cb))
+        ChannelStrip (std::vector<SyntaktAudioTrack>& tr,
+                      ArmCb                           cb,
+                      VuMeterLevelStore&              store)
+            : tracks (tr),
+              onArmToggled (std::move (cb)),
+              vuLevels (store)
         { setInterceptsMouseClicks (true, false); }
 
         void mouseDown (const juce::MouseEvent& e) override
@@ -735,13 +763,23 @@ private:
                             (int) colW, kBtnTopPad - 1,
                             juce::Justification::centred, false);
 
-                // ── Vertical track label ──────────────────────────
-                // Draw text rotated -90° (reads bottom to top).
-                // We save/restore the Graphics transform around this.
+                // ── Label-area geometry ───────────────────────────
                 const float labelTop  = btnY + btnDiam + (float) kLabelGap;
                 const float labelH    = (float) getHeight() - labelTop - (float) kBottomMargin;
                 const float labelW    = colW - 2.0f;
 
+                {
+                    const float vuStripW = (float) VuMeterGeom::kVuStripW;
+                    const float stripX   = cx - vuStripW * 0.5f;
+                    const float level    = (t.deviceChannelIndex >= 0)
+                                           ? vuLevels.getLevel (t.deviceChannelIndex)
+                                           : 0.0f;
+                    drawChannelVuMeter (g, stripX, labelTop, labelH, level);
+                }
+
+                // ── Vertical track label ──────────────────────────
+                // Draw text rotated -90° (reads bottom to top).
+                // We save/restore the Graphics transform around this.
                 const juce::Colour textCol =
                     t.isArmed    ? juce::Colours::white.withAlpha (0.95f)
                   : t.isMainMix  ? juce::Colour (0xff7ab8e8)
@@ -762,13 +800,13 @@ private:
                     //   width  becomes labelH (the rotated height)
                     //   height becomes labelW (the rotated width)
                     g.drawText (t.displayName,
-                                (int) (pivotX - labelH * 0.5f),
-                                (int) (pivotY - labelW * 0.5f),
+                                (int) (pivotX - labelH * 0.38f),
+                                (int) (pivotY - labelW * 0.70f),
                                 (int) labelH,
                                 (int) labelW,
                                 juce::Justification::centredLeft,
                                 true);
-                }   // ← rotation transform released here
+                }   // rotation transform released here
  
                 // ── Column divider (drawn in normal coords, no rotation) ──
                 if (i > 0)
@@ -783,6 +821,8 @@ private:
     private:
         std::vector<SyntaktAudioTrack>& tracks;
         ArmCb onArmToggled;
+
+        VuMeterLevelStore& vuLevels;
 
         // Geometry
         static constexpr int kBtnMaxDiam   = 26;  // LED diameter cap (px)
@@ -803,6 +843,10 @@ private:
     std::unique_ptr<juce::FileChooser>    fileChooser;
 
     std::vector<SyntaktAudioTrack> tracks;
+
+    VuMeterLevelStore vuLevels;
+
+    int timerTickCount = 0;
 
     juce::Label      statusLabel;
     juce::Label      outputDirPathLabel;

@@ -7,17 +7,12 @@
 #include "DelayEditorComponent.h"
 #include "ScopeModalComponent.h"
 #include "Cosmetic.h"
-// Audi Recorder only available for Linux Standalone version
-//  juce_StandaloneFilterWindow.h is NOT pulled in by <JuceHeader.h>;
-//  it must be included explicitly wherever StandalonePluginHolder
-//  is used.  Keeping it here (MainComponent only) means
-//  AudioRecorderComponent itself stays free of that dependency.
-
-#if JUCE_LINUX && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone
+// Audio Recorder only available for Linux Standalone version
+#if JUCE_LINUX \
+    && defined(JucePlugin_Build_Standalone) && JucePlugin_Build_Standalone \
+    && defined(MODZTAKT_OVERBRIDGE) && MODZTAKT_OVERBRIDGE
     #include "OverbridgeEngine.h"       // must come before AudioRecorderComponent
     #include "AudioRecorderComponent.h"
-    // NOTE: juce_StandaloneFilterWindow.h is no longer needed here.
-    // AudioDeviceManager is no longer injected — the engine owns USB directly.
 #endif
 
 

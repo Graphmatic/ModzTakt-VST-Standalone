@@ -3612,6 +3612,9 @@
     <ClInclude Include="..\..\Source\MainComponent.h">
       <Filter>ModzTakt\Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\AudioRecorderComponent.h">
+      <Filter>ModzTakt</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\Cosmetic.h">
       <Filter>ModzTakt</Filter>
     </ClInclude>
@@ -3627,6 +3630,9 @@
     <ClInclude Include="..\..\Source\EnvelopeEngine.h">
       <Filter>ModzTakt</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\EnvelopeFollowerEngine.h">
+      <Filter>ModzTakt</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\LfoEngine.h">
       <Filter>ModzTakt</Filter>
     </ClInclude>
@@ -3634,6 +3640,9 @@
       <Filter>ModzTakt</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\MidiInput.h">
+      <Filter>ModzTakt</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\OverbridgeEngine.h">
       <Filter>ModzTakt</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\PluginEditor.h">
@@ -3646,6 +3655,9 @@
       <Filter>ModzTakt</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SyntaktParameterTable.h">
+      <Filter>ModzTakt</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\VuMeterComponent.h">
       <Filter>ModzTakt</Filter>
     </ClInclude>
     <ClInclude Include="..\..\JuceLibraryCode\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h">

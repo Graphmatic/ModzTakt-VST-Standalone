@@ -2832,18 +2832,22 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Source\MainComponent.h"/>
+    <ClInclude Include="..\..\Source\AudioRecorderComponent.h"/>
     <ClInclude Include="..\..\Source\Cosmetic.h"/>
     <ClInclude Include="..\..\Source\DelayEditorComponent.h"/>
     <ClInclude Include="..\..\Source\DelayEngine.h"/>
     <ClInclude Include="..\..\Source\EnvelopeEditorComponent.h"/>
     <ClInclude Include="..\..\Source\EnvelopeEngine.h"/>
+    <ClInclude Include="..\..\Source\EnvelopeFollowerEngine.h"/>
     <ClInclude Include="..\..\Source\LfoEngine.h"/>
     <ClInclude Include="..\..\Source\MidiInParse.h"/>
     <ClInclude Include="..\..\Source\MidiInput.h"/>
+    <ClInclude Include="..\..\Source\OverbridgeEngine.h"/>
     <ClInclude Include="..\..\Source\PluginEditor.h"/>
     <ClInclude Include="..\..\Source\PluginProcessor.h"/>
     <ClInclude Include="..\..\Source\ScopeModalComponent.h"/>
     <ClInclude Include="..\..\Source\SyntaktParameterTable.h"/>
+    <ClInclude Include="..\..\Source\VuMeterComponent.h"/>
     <ClInclude Include="..\..\JuceLibraryCode\modules\juce_audio_basics\audio_play_head\juce_AudioPlayHead.h"/>
     <ClInclude Include="..\..\JuceLibraryCode\modules\juce_audio_basics\buffers\juce_AudioChannelSet.h"/>
     <ClInclude Include="..\..\JuceLibraryCode\modules\juce_audio_basics\buffers\juce_AudioDataConverters.h"/>
