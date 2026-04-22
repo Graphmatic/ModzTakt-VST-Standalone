@@ -75,17 +75,26 @@ namespace modztakt::delay
         bool perNoteEg = false;
         modztakt::eg::Params noteEgParams;
 
-        // Step sequencer: when seqEnabled is true, each echo index is looked up
-        // in seqSteps[echoIdx % stepCount] before being queued.  A false entry
-        // silently skips that echo (no note-on / note-off scheduled).
-        // stepCount is 6 when seqTernary is true, 8 otherwise.
-        // All steps default to true so the sequencer is transparent when enabled
-        // but no step has been manually muted.
+        // Step sequencer: when seqEnabled is true each echo is looked up in
+        // routeSeqSteps[route][stepIdx] before a ScheduledNote is created.
+        // Each route has an independent pattern; seqTernary (step count 6 or 8)
+        // and seqEnabled are shared across all routes.
+        // All steps default to true so the sequencer is transparent until the
+        // user explicitly mutes a step.
         static constexpr int maxSteps = 8;
         bool seqEnabled  = false;
         bool seqTernary  = false;  // false = 8-step (binary), true = 6-step (ternary)
-        std::array<bool, maxSteps> seqSteps { true, true, true, true,
-                                              true, true, true, true };
+
+        // Per-route step patterns: routeSeqSteps[route][step].
+        // All steps default to true so each route passes all echoes until the
+        // user explicitly mutes a step.  seqTernary and seqEnabled are shared
+        // across all routes — only the step pattern is per-route.
+        std::array<std::array<bool, maxSteps>, maxDelayRoutes> routeSeqSteps = []()
+        {
+            std::array<std::array<bool, maxSteps>, maxDelayRoutes> a;
+            for (auto& row : a) row.fill (true);
+            return a;
+        }();
 
         // Auto-pan: when panEnabled, a pan CC is injected before each echo note-on.
         // panWidth 0..1 maps to 0..63 deviation from bipolar CC centre (64).
@@ -220,24 +229,14 @@ namespace modztakt::delay
                 if (echoVel < (1.0f / 127.0f))
                     break;
 
-                // Step sequencer gate: when enabled, look up whether this echo
-                // index (mod stepCount) is active.
-                // - Muted steps are skipped (no ScheduledNote created), BUT
-                //   echoVel is NOT decayed again for a muted step — only the
-                //   advance from the top of the loop counts.  This keeps the
-                //   velocity chain consistent regardless of the mute pattern;
-                //   otherwise dense muting would exhaust the budget too fast
-                //   and cut off later active echoes prematurely.
-                if (params.seqEnabled)
-                {
-                    const int stepCount = params.seqTernary ? 6 : Params::maxSteps;
-                    // Shift by 1: echo 0 → button 1, echo (stepCount-1) → button 0.
-                    // Button 0 therefore controls the first echo of the *next* loop
-                    // iteration — aligning with bar-start when sync is active.
-                    const int stepIdx = (echoIdx + 1) % stepCount;
-                    if (!params.seqSteps[stepIdx])
-                        continue;
-                }
+                // Pre-compute the step index for this echo (shared across routes;
+                // ternary mode is global).  Shift by 1 so echo 0 maps to button 1
+                // and button 0 controls the first echo of the *next* loop iteration,
+                // aligning with bar-start when sync is active.
+                // stepIdx is only used when seqEnabled — compute unconditionally to
+                // avoid a branch inside the per-route loop below.
+                const int stepCount = params.seqTernary ? 6 : Params::maxSteps;
+                const int stepIdx   = (echoIdx + 1) % stepCount;
 
                 const double onMs  = blockStartMs + static_cast<double> (echoIdx + 1) * delayMs;
                 const double offMs = onMs + tentativeDurMs;
@@ -247,6 +246,14 @@ namespace modztakt::delay
                 for (int r = 0; r < maxDelayRoutes; ++r)
                 {
                     if (params.routeChannels[r] <= 0)
+                        continue;
+
+                    // Per-route step gate.
+                    // Each route has its own pattern; a muted step on one route
+                    // does not affect the others.  Velocity has already been
+                    // decayed once at the top of the outer loop regardless of
+                    // per-route muting, keeping the chain consistent.
+                    if (params.seqEnabled && !params.routeSeqSteps[r][stepIdx])
                         continue;
 
                     if (scheduledNotes.size() >= maxQueueSize)

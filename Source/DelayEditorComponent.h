@@ -217,16 +217,35 @@ public:
         addAndMakeVisible (seqBinaryLabel);
         addAndMakeVisible (seqTernaryLabel);
 
-        // Step buttons — backed by individual APVTS bools.
-        for (int s = 0; s < maxSeqSteps; ++s)
+        // Per-route row labels ("R1", "R2", "R3")
+        for (int r = 0; r < maxRoutes; ++r)
         {
-            seqStepBtn[s] = std::make_unique<LedToggleButton> (
-                juce::String (s + 1), SetupUI::LedColour::Orange);
-            seqStepBtn[s]->setClickingTogglesState (true);
-            addAndMakeVisible (*seqStepBtn[s]);
-            seqStepAttach[s] = std::make_unique<ButtonAttachment> (
-                apvts, "delaySeqStep" + juce::String (s), *seqStepBtn[s]);
+            seqRouteLabel[r].setText ("Route " + juce::String (r + 1), juce::dontSendNotification);
+            seqRouteLabel[r].setJustificationType (juce::Justification::centredRight);
+            seqRouteLabel[r].setColour (juce::Label::textColourId, SetupUI::labelsColor);
+            seqRouteLabel[r].setAlpha (0.7f);
+            addAndMakeVisible (seqRouteLabel[r]);
         }
+
+        // Step buttons — per-route, backed by individual APVTS bools.
+        // Route colours: R1=Orange, R2=Green, R3=Blue for quick visual distinction.
+        const SetupUI::LedColour routeStepColour[maxRoutes] = {
+            SetupUI::LedColour::Orange,
+            SetupUI::LedColour::Green,
+            SetupUI::LedColour::Blue
+        };
+        for (int r = 0; r < maxRoutes; ++r)
+            for (int s = 0; s < maxSeqSteps; ++s)
+            {
+                seqStepBtn[r][s] = std::make_unique<LedToggleButton> (
+                    juce::String (s + 1), routeStepColour[r]);
+                seqStepBtn[r][s]->setClickingTogglesState (true);
+                addAndMakeVisible (*seqStepBtn[r][s]);
+                seqStepAttach[r][s] = std::make_unique<ButtonAttachment> (
+                    apvts,
+                    "delaySeqRoute" + juce::String (r) + "Step" + juce::String (s),
+                    *seqStepBtn[r][s]);
+            }
 
         // ── Auto-pan ─────────────────────────────────────────────────────────
         panEnableBtn = std::make_unique<LedToggleButton> ("Pan", SetupUI::LedColour::Blue);
@@ -263,8 +282,9 @@ public:
             delayRouteTransposeAttach[r].reset();
         }
 
-        for (int s = 0; s < maxSeqSteps; ++s)
-            seqStepAttach[s].reset();
+        for (int r = 0; r < maxRoutes; ++r)
+            for (int s = 0; s < maxSeqSteps; ++s)
+                seqStepAttach[r][s].reset();
 
         panEnableAttach.reset();
         panWidthAttach.reset();
@@ -373,24 +393,28 @@ public:
         content.removeFromTop (24);
 
         // ── Step sequencer sub-frame ──────────────────────────────────────────
-        // Two rows inside a GroupComponent titled "Echo Seq":
-        //   Row 1: Binary / Ternary radio pair
-        //   Row 2: step buttons (8 or 6 depending on mode)
+        // Rows inside a GroupComponent titled "Echo Seq":
+        //   Row 0: Binary / Ternary radio pair
+        //   Rows 1-3: per-route step buttons (each preceded by a "R1"/"R2"/"R3" label)
         {
-            const bool ternary    = apvts.getRawParameterValue ("delaySeqTernary")->load() > 0.5f;
+            const bool ternary     = apvts.getRawParameterValue ("delaySeqTernary")->load() > 0.5f;
             const int  activeSteps = ternary ? 6 : maxSeqSteps;
+            constexpr int rowGap   = 6;
+            constexpr float routeLblW = 60.0f;
 
-            // Total height: group title area (20) + ternary row + gap + steps row + bottom pad
-            const int seqInnerH = rowHeight + 16 + rowHeight + 16;   // two rows + gap
-            const int seqGroupH = 20 + seqInnerH + 8;          // title + content + bottom pad
+            // Height: title(20) + mode-row + gap + 3*(step-row+gap) + bottom-pad(6)
+            const int seqGroupH = 20
+                                + rowHeight          // Binary/Ternary row
+                                + rowGap
+                                + maxRoutes * (rowHeight + rowGap)
+                                + 6;
             auto seqGroupArea = content.removeFromTop (seqGroupH);
             seqGroup.setBounds (seqGroupArea);
 
-            // Content area inside the frame
             auto seqContent = seqGroupArea.reduced (8, 4);
-            seqContent.removeFromTop (16);  // clear the title text area
+            seqContent.removeFromTop (16);   // clear title text area
 
-            // Row 1: Binary [●]  [●] Ternary
+            // Row 0: Binary [●]  [●] Ternary
             {
                 auto row = seqContent.removeFromTop (rowHeight);
                 juce::FlexBox fb;
@@ -411,23 +435,30 @@ public:
                 fb.performLayout (row.toFloat());
             }
 
-            seqContent.removeFromTop (16);
-
-            // Row 2: step buttons, equally spaced
+            // Rows 1-3: per-route step buttons
+            for (int r = 0; r < maxRoutes; ++r)
             {
+                seqContent.removeFromTop (rowGap);
                 auto row = seqContent.removeFromTop (rowHeight);
+
                 juce::FlexBox fb;
                 fb.flexDirection  = juce::FlexBox::Direction::row;
                 fb.alignItems     = juce::FlexBox::AlignItems::center;
-                fb.justifyContent = juce::FlexBox::JustifyContent::center;
+                fb.justifyContent = juce::FlexBox::JustifyContent::flexStart;
+
+                // Small route label on the left so rows are identifiable
+                fb.items.add (juce::FlexItem (seqRouteLabel[r])
+                                  .withWidth (routeLblW).withHeight ((float) rowHeight)
+                                  .withMargin ({ 0, 2, 0, 4 }));
+
                 for (int s = 0; s < maxSeqSteps; ++s)
                 {
                     const bool visible = (s < activeSteps);
-                    seqStepBtn[s]->setVisible (visible);
+                    seqStepBtn[r][s]->setVisible (visible);
                     if (visible)
-                        fb.items.add (juce::FlexItem (*seqStepBtn[s])
-                                          .withWidth (btnW * 1.5).withHeight (btnW * 1.5)
-                                          .withMargin ({ 3, 3, 3, 3 }));
+                        fb.items.add (juce::FlexItem (*seqStepBtn[r][s])
+                                          .withFlex (1.0f).withHeight ((float)(rowHeight - 2))
+                                          .withMargin ({ 1, activeSteps == 6 ? (float)20 : (float)8, 1, 2 }));
                 }
                 fb.performLayout (row.toFloat());
             }
@@ -699,16 +730,17 @@ private:
         seqBinaryLabel.setAlpha (a);
         seqTernaryLabel.setAlpha (a);
 
-        for (int s = 0; s < maxSeqSteps; ++s)
-        {
-            const bool stepVisible = (s < activeSteps);
-            seqStepBtn[s]->setVisible (stepVisible);
-            if (stepVisible)
+        for (int r = 0; r < maxRoutes; ++r)
+            for (int s = 0; s < maxSeqSteps; ++s)
             {
-                seqStepBtn[s]->setEnabled (enabled);
-                seqStepBtn[s]->setAlpha (a);
+                const bool stepVisible = (s < activeSteps);
+                seqStepBtn[r][s]->setVisible (stepVisible);
+                if (stepVisible)
+                {
+                    seqStepBtn[r][s]->setEnabled (enabled);
+                    seqStepBtn[r][s]->setAlpha (a);
+                }
             }
-        }
 
         // Trigger a layout refresh when ternary mode changes (step buttons show/hide).
         if (ternary != lastSeqTernary)
@@ -1000,8 +1032,12 @@ private:
     std::unique_ptr<LedToggleButton>  seqBinaryBtn,  seqTernaryBtn;
     juce::Label                       seqBinaryLabel, seqTernaryLabel;
 
-    std::array<std::unique_ptr<LedToggleButton>,  maxSeqSteps> seqStepBtn;
-    std::array<std::unique_ptr<ButtonAttachment>, maxSeqSteps> seqStepAttach;
+    // Per-route step buttons and attachments [route][step]
+    std::array<std::array<std::unique_ptr<LedToggleButton>,  maxSeqSteps>, maxRoutes> seqStepBtn;
+    std::array<std::array<std::unique_ptr<ButtonAttachment>, maxSeqSteps>, maxRoutes> seqStepAttach;
+
+    // Small "R1"/"R2"/"R3" labels to the left of each step row
+    std::array<juce::Label, maxRoutes> seqRouteLabel;
 
     bool lastSeqTernary = false; // tracks ternary state to trigger resized()
 

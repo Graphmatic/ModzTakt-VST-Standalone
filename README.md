@@ -1,4 +1,5 @@
 A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or other synth if you edit MIDI CC/NRPN mapping)
+
 Linux standalone is also available with OverBridge mode per track Audio recording.
 
 <img width="1432" height="963" alt="Screenshot from 2026-03-20 17-58-30" src="https://github.com/user-attachments/assets/3c965250-e7e3-48f5-9fe1-d30b5be890ea" />
@@ -38,6 +39,19 @@ to compile the linux standalone version with OB audio, use the separate Makefile
 LFO route triggered by EG always run until end of EG cycle.
 
 When launching the app for the first time, use Options -> "Reset to default state" first.
+
+Syntakt configuration:
+in Settings->MIDI config->Port Config: 
+	-Input from / Output to = USB (or MIDI+USB)
+	-Output CH = TRK CH
+	-Trig Key DST = INT+EXT
+	-Receive Notes = YES
+	-Receive CC/NRPN = YES
+in Settings->MIDI config->Channels:
+	-Track 1-12 = Channel 1-12
+in Settings->MIDI config->Sync:
+	-Clock Send = YES
+	-Transport Send = YES
 
 Edit MIDI mapping and parameters names in SyntaktParameterTable.h to use the app with others synths
 

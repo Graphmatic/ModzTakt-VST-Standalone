@@ -757,9 +757,12 @@ public:
         // pattern; whether any step is muted is what changes behaviour in practice.
         delayParams.seqEnabled = true;
         delayParams.seqTernary = apvts.getRawParameterValue ("delaySeqTernary")->load() > 0.5f;
-        for (int s = 0; s < modztakt::delay::Params::maxSteps; ++s)
-            delayParams.seqSteps[s] =
-                apvts.getRawParameterValue ("delaySeqStep" + juce::String (s))->load() > 0.5f;
+        for (int r = 0; r < modztakt::delay::maxDelayRoutes; ++r)
+            for (int s = 0; s < modztakt::delay::Params::maxSteps; ++s)
+                delayParams.routeSeqSteps[r][s] =
+                    apvts.getRawParameterValue (
+                        "delaySeqRoute" + juce::String (r) + "Step" + juce::String (s))
+                    ->load() > 0.5f;
 
         delayParams.panEnabled = apvts.getRawParameterValue ("delayPanEnabled")->load() > 0.5f;
         delayParams.panWidth   = apvts.getRawParameterValue ("delayPanWidth")  ->load();        
@@ -1612,13 +1615,15 @@ private:
         p.push_back (std::make_unique<juce::AudioParameterBool>(
             "delaySeqTernary", "Delay Seq Ternary", false));
 
-        // Individual step gates — 8 bools, all ON by default.
+        // Per-route step gates: delaySeqRoute{r}Step{s}, all ON by default.
         // Steps 6 and 7 are ignored when delaySeqTernary is true.
-        for (int s = 0; s < 8; ++s)
-            p.push_back (std::make_unique<juce::AudioParameterBool>(
-                "delaySeqStep" + juce::String (s),
-                "Delay Seq Step " + juce::String (s + 1),
-                true));   // default: all steps active
+        // 3 routes × 8 steps = 24 parameters.
+        for (int r = 0; r < modztakt::delay::maxDelayRoutes; ++r)
+            for (int s = 0; s < modztakt::delay::Params::maxSteps; ++s)
+                p.push_back (std::make_unique<juce::AudioParameterBool>(
+                    "delaySeqRoute" + juce::String (r) + "Step" + juce::String (s),
+                    "Delay Route " + juce::String (r + 1) + " Seq Step " + juce::String (s + 1),
+                    true));   // default: all steps active
 
         // ── Auto-pan ──────────────────────────────────────────────────────────
         // When enabled, a bipolar pan CC ("Amp: Pan") is sent before each echo
