@@ -2,7 +2,7 @@ A MIDI standalone app and VST3 plugin to interact with Elektron Syntakt (or othe
 
 Linux standalone is also available with OverBridge mode per track Audio recording.
 
-<img width="1432" height="963" alt="Screenshot from 2026-03-20 17-58-30" src="https://github.com/user-attachments/assets/3c965250-e7e3-48f5-9fe1-d30b5be890ea" />
+<img width="1438" height="967" alt="Screenshot from 2026-04-22 06-23-27" src="https://github.com/user-attachments/assets/99d2dfb6-189b-4cf4-a1ef-d3f6aba24267" />
 
 If you want to use/compile the Linux Standalone version with OB audio recording, install "libusb-1.0" from terminal first and ensure that user have permission on real time audio:
 Create or edit /etc/udev/rules.d/99-elektron-overbridge.rules:
