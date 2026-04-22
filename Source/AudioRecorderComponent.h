@@ -666,7 +666,7 @@ private:
     //  Each column contains:
     //    • a round arm LED button (clickable)
     //    • the track name drawn vertically below it
-    //    • a 7-LED VU meter centred in the label area (BUG FIX)
+    //    • a 7-LED VU meter centred in the label area
     //
     //  Column width = component width / numChannels.
     //  The track name is drawn rotated -90° so it reads
